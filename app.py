@@ -95,24 +95,14 @@ with st.form("gen_form", clear_on_submit=False):
         "WEBSITE URL *",
         placeholder="https://www.yourcompany.com"
     )
+    api_key = st.text_input(
+        "OPENROUTER API KEY *",
+        type="password",
+        placeholder="sk-or-v1-..."
+    )
 
-    col1, col2 = st.columns([3, 2])
-    with col1:
-        api_key = st.text_input(
-            "OPENROUTER API KEY *",
-            type="password",
-            placeholder="sk-or-v1-..."
-        )
-    with col2:
-        model = st.selectbox(
-            "Claude Model",
-            options=[
-                "anthropic/claude-3.5-sonnet",
-                "anthropic/claude-3.5-haiku",
-                "anthropic/claude-3-opus",
-            ],
-            help="claude-3.5-sonnet gives best quality. haiku is faster and cheaper."
-        )
+    # Model hardcoded — no dropdown needed
+    model = "anthropic/claude-sonnet-4-6"
 
     submitted = st.form_submit_button(
         "🚀  Generate Both Documents",
