@@ -19,6 +19,24 @@ LGREY = RGBColor(0xE2, 0xE8, 0xF2)
 IN    = Inches
 
 
+def _adaptive_fs(text: str, base_fs: float, ideal_chars: int = 8) -> float:
+    """Scale font size down so long stat values don't overflow their card."""
+    n = len(str(text))
+    if n <= ideal_chars:
+        return base_fs
+    return max(8.0, base_fs * (ideal_chars / n) ** 0.65)
+
+
+def _founding_year(stats: dict) -> str:
+    """Try to extract a founding year label from the stats dict."""
+    if not stats:
+        return ''
+    for k, v in stats.items():
+        if any(w in k.lower() for w in ('found', 'established', 'estab', 'incorp', 'since', 'year')):
+            return str(v)
+    return ''
+
+
 # ── Theme ──────────────────────────────────────────────────────
 
 class Theme:
@@ -119,9 +137,10 @@ def _A_stat_row(sl, t, stats, y):
     n=len(items); gap=.14; cw=(9.3-gap*(n-1))/n; ch=.82
     for i,(lbl,val) in enumerate(items):
         x=.35+i*(cw+gap)
+        vfs=_adaptive_fs(val, 18, ideal_chars=7)
         _rrect(sl, IN(x), IN(y), IN(cw), IN(ch), t.card_bg, t.accent)
-        _txt(sl, IN(x+.05), IN(y+.05), IN(cw-.1), IN(ch*.58), val, 18, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
-        _txt(sl, IN(x+.05), IN(y+ch*.52), IN(cw-.1), IN(ch*.42), lbl, 8.5, WHITE, align=PP_ALIGN.CENTER)
+        _txt(sl, IN(x+.05), IN(y+.05), IN(cw-.1), IN(ch*.58), val, vfs, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia', wrap=True)
+        _txt(sl, IN(x+.05), IN(y+ch*.52), IN(cw-.1), IN(ch*.42), lbl, 8.5, WHITE, align=PP_ALIGN.CENTER, wrap=True)
 
 def _A_content(prs, layout, t, sd, cn, wu, n, total):
     sl = prs.slides.add_slide(layout); _bg(sl, WHITE); _A_chrome(sl, t, cn, n, total, wu)
@@ -216,9 +235,10 @@ def _A_title(prs, layout, t, sd, data):
         cw=(9.3-gap*(nc-1))/nc; ch=1.10; cy=3.22
         for i,(lbl,val) in enumerate(items):
             x=.35+i*(cw+gap)
+            vfs=_adaptive_fs(str(val), 26, ideal_chars=8)
             _rrect(sl, IN(x), IN(cy), IN(cw), IN(ch), t.card_bg, t.accent)
-            _txt(sl, IN(x+.05), IN(cy+.06), IN(cw-.1), IN(ch*.58), str(val), 26, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
-            _txt(sl, IN(x+.05), IN(cy+ch*.52), IN(cw-.1), IN(ch*.42), lbl, 9.5, WHITE, align=PP_ALIGN.CENTER)
+            _txt(sl, IN(x+.05), IN(cy+.06), IN(cw-.1), IN(ch*.58), str(val), vfs, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia', wrap=True)
+            _txt(sl, IN(x+.05), IN(cy+ch*.52), IN(cw-.1), IN(ch*.42), lbl, 9.5, WHITE, align=PP_ALIGN.CENTER, wrap=True)
     _txt(sl, IN(.5), IN(5.28), IN(9), IN(.28), wu, 11, t.accent, italic=True, align=PP_ALIGN.CENTER)
 
 def _A_closing(prs, layout, t, sd, data):
@@ -354,29 +374,35 @@ def _B_title(prs, layout, t, sd, data):
     _bg(sl, WHITE)
     # Left half solid
     _rect(sl, IN(0), IN(0), IN(5.2), IN(5.625), t.primary)
-    # Decorative rectangles
     _rect(sl, IN(0), IN(4.5), IN(5.2), IN(.6), t.dark_bg)
     _rect(sl, IN(5.2), IN(0), IN(.08), IN(5.625), t.accent)
-    # Company name in left panel
-    _txt(sl, IN(.3), IN(.4), IN(4.6), IN(.3), 'EST. 1940', 9, t.light, bold=True, fname='Calibri')
-    _txt(sl, IN(.3), IN(.8), IN(4.6), IN(2.2), cn, 38, t.accent, bold=True, fname='Georgia', wrap=True)
+    # Company name in left panel — founding year extracted dynamically
+    stats_raw = sd.get('stats')
+    found_yr = _founding_year(stats_raw if isinstance(stats_raw, dict) else {})
+    if found_yr:
+        _txt(sl, IN(.3), IN(.4), IN(4.6), IN(.3), f'EST. {found_yr}', 9, t.light, bold=True, fname='Calibri')
+    _txt(sl, IN(.3), IN(.8 if found_yr else .55), IN(4.6), IN(2.2), cn, 38, t.accent, bold=True, fname='Georgia', wrap=True)
     tag=sd.get('description') or data.get('tagline','')
-    if tag: _txt(sl, IN(.3), IN(3.2), IN(4.6), IN(.8), tag, 14, WHITE, italic=True, wrap=True)
+    if tag: _txt(sl, IN(.3), IN(3.15), IN(4.6), IN(.9), tag, 13, WHITE, italic=True, wrap=True)
     _txt(sl, IN(.3), IN(4.55), IN(4.6), IN(.3), wu, 10, t.light, italic=True)
-    # Right side content
-    _txt(sl, IN(5.5), IN(.5), IN(4.1), IN(.3), data.get('tagline',''), 13, GREY, italic=True, wrap=True)
-    stats=sd.get('stats')
-    if stats and isinstance(stats,dict):
-        items=list(stats.items())[:4]; nc=len(items)
-        cw=(4.1-.1*(nc-1))/nc; ch=1.1; gap=.1
+    # Right side — tagline at top
+    tagline = data.get('tagline','')
+    if tagline: _txt(sl, IN(5.5), IN(.28), IN(4.1), IN(.45), tagline, 12, GREY, italic=True, wrap=True)
+    # Stats — 2×2 grid so each card is ~2" wide (avoids text overflow)
+    if stats_raw and isinstance(stats_raw, dict):
+        items=list(stats_raw.items())[:4]; ncols=2
+        cw=(4.1-.12)/ncols; ch=.88; gap=.12; sy=.82
         for i,(lbl,val) in enumerate(items):
-            x=5.5+i*(cw+gap); y=1.5
-            _rrect(sl, IN(x), IN(y), IN(cw), IN(ch), t.light); 
-            _txt(sl, IN(x+.05), IN(y+.06), IN(cw-.1), IN(ch*.55), str(val), 24, t.primary, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
-            _txt(sl, IN(x+.05), IN(y+ch*.54), IN(cw-.1), IN(ch*.4), lbl, 9, GREY, align=PP_ALIGN.CENTER)
-    # Feature points right side
+            r=i//ncols; c=i%ncols
+            x=5.5+c*(cw+gap); y=sy+r*(ch+.1)
+            vfs=_adaptive_fs(str(val), 20, ideal_chars=7)
+            _rrect(sl, IN(x), IN(y), IN(cw), IN(ch), t.light)
+            _txt(sl, IN(x+.06), IN(y+.06), IN(cw-.12), IN(ch*.55), str(val), vfs, t.primary, bold=True, align=PP_ALIGN.CENTER, fname='Georgia', wrap=True)
+            _txt(sl, IN(x+.06), IN(y+ch*.54), IN(cw-.12), IN(ch*.42), lbl, 8.5, GREY, align=PP_ALIGN.CENTER, wrap=True)
+    # Bullet points below stats
     pts=sd.get('key_points',[])
-    if pts: _bullets(sl, IN(5.5), IN(2.9), IN(4.1), IN(2.4), pts[:5], fs=11, color=DARK)
+    bullet_y = .82 + 2*(0.88+.1) + .12   # below the 2-row grid
+    if pts: _bullets(sl, IN(5.5), IN(bullet_y), IN(4.1), IN(5.35-bullet_y), pts[:4], fs=10.5, color=DARK)
 
 def _B_closing(prs, layout, t, sd, data):
     sl=prs.slides.add_slide(layout); cn=data.get('company_name',''); wu=data.get('website',''); contact=data.get('contact',{})
@@ -439,8 +465,9 @@ def _C_content(prs, layout, t, sd, cn, wu, n, total):
         for i,(lbl,val) in enumerate(items):
             px=.22+i*(pw+gap)
             _rrect(sl, IN(px), IN(4.7), IN(pw), IN(ph), t.primary)
-            _txt(sl, IN(px+.04), IN(4.72), IN(pw-.08), IN(ph*.55), str(val), 16, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
-            _txt(sl, IN(px+.04), IN(4.72+ph*.52), IN(pw-.08), IN(ph*.42), lbl, 7.5, WHITE, align=PP_ALIGN.CENTER)
+            vfs=_adaptive_fs(str(val), 16, ideal_chars=7)
+            _txt(sl, IN(px+.04), IN(4.72), IN(pw-.08), IN(ph*.55), str(val), vfs, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia', wrap=True)
+            _txt(sl, IN(px+.04), IN(4.72+ph*.52), IN(pw-.08), IN(ph*.42), lbl, 7.5, WHITE, align=PP_ALIGN.CENTER, wrap=True)
 
 def _C_twocol(prs, layout, t, sd, cn, wu, n, total):
     sl=prs.slides.add_slide(layout); _bg(sl, t.bg_warm); _C_chrome(sl, t, cn, n, total, wu)
@@ -463,8 +490,9 @@ def _C_twocol(prs, layout, t, sd, cn, wu, n, total):
         for i,(lbl,val) in enumerate(items):
             px=.22+i*(pw+gap)
             _rrect(sl, IN(px), IN(4.7), IN(pw), IN(ph), t.primary)
-            _txt(sl, IN(px+.04), IN(4.72), IN(pw-.08), IN(ph*.55), str(val), 16, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
-            _txt(sl, IN(px+.04), IN(4.72+ph*.52), IN(pw-.08), IN(ph*.42), lbl, 7.5, WHITE, align=PP_ALIGN.CENTER)
+            vfs=_adaptive_fs(str(val), 16, ideal_chars=7)
+            _txt(sl, IN(px+.04), IN(4.72), IN(pw-.08), IN(ph*.55), str(val), vfs, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia', wrap=True)
+            _txt(sl, IN(px+.04), IN(4.72+ph*.52), IN(pw-.08), IN(ph*.42), lbl, 7.5, WHITE, align=PP_ALIGN.CENTER, wrap=True)
 
 def _C_timeline(prs, layout, t, sd, cn, wu, n, total):
     sl=prs.slides.add_slide(layout); _bg(sl, t.bg_warm); _C_chrome(sl, t, cn, n, total, wu)
@@ -519,10 +547,11 @@ def _C_title(prs, layout, t, sd, data):
         cw=(9.5-gap*(nc-1))/nc; ch=1.25; cy=3.1
         for i,(lbl,val) in enumerate(items):
             x=.25+i*(cw+gap)
+            vfs=_adaptive_fs(str(val), 26, ideal_chars=8)
             card=_rrect(sl, IN(x), IN(cy), IN(cw), IN(ch), t.light); card.line.color.rgb=t.chrome; card.line.width=Pt(.8)
             _rect(sl, IN(x), IN(cy), IN(cw), IN(.07), t.primary)
-            _txt(sl, IN(x+.05), IN(cy+.1), IN(cw-.1), IN(ch*.55), str(val), 26, t.primary, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
-            _txt(sl, IN(x+.05), IN(cy+ch*.56), IN(cw-.1), IN(ch*.38), lbl, 9.5, GREY, align=PP_ALIGN.CENTER)
+            _txt(sl, IN(x+.05), IN(cy+.1), IN(cw-.1), IN(ch*.55), str(val), vfs, t.primary, bold=True, align=PP_ALIGN.CENTER, fname='Georgia', wrap=True)
+            _txt(sl, IN(x+.05), IN(cy+ch*.56), IN(cw-.1), IN(ch*.38), lbl, 9.5, GREY, align=PP_ALIGN.CENTER, wrap=True)
     _txt(sl, IN(.5), IN(4.6), IN(9), IN(.25), wu, 11, GREY, italic=True, align=PP_ALIGN.CENTER)
     # Bottom stripe
     _rect(sl, IN(0), IN(5.45), IN(10), IN(.18), t.primary)
