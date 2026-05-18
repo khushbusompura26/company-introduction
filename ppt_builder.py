@@ -279,6 +279,36 @@ def _B_content(prs, layout, t, sd, cn, wu, n, total):
     if pts: _bullets(sl, IN(CX), IN(content_y), IN(CW), IN(bullet_h), pts, fs=12.5)
     _txt(sl, IN(CX), IN(5.38), IN(CW), IN(.2), cn, 7.5, t.chrome)
 
+def _B_twocol(prs, layout, t, sd, cn, wu, n, total):
+    sl=prs.slides.add_slide(layout); _bg(sl, WHITE)
+    title=sd.get('title',''); desc=sd.get('description','')
+    pts=sd.get('key_points',[]); stats=sd.get('stats')
+
+    # Left panel
+    _rect(sl, IN(0), IN(0), IN(PW), IN(5.625), t.primary)
+    _txt(sl, IN(.15), IN(.1), IN(PW-.2), IN(.22), f'{n}/{total}', 8, t.light, align=PP_ALIGN.RIGHT)
+    _txt(sl, IN(.15), IN(.35), IN(PW-.2), IN(.22), cn.upper(), 7.5, t.light, bold=True)
+    _txt(sl, IN(.15), IN(1.0), IN(PW-.25), IN(2.0), title, 22, WHITE, bold=True, fname='Georgia', wrap=True)
+    _rect(sl, IN(.15), IN(3.1), IN(PW-.3), IN(.04), t.accent)
+    if desc: _txt(sl, IN(.15), IN(3.22), IN(PW-.25), IN(1.5), desc, 9.5, t.light, italic=True, wrap=True)
+    _txt(sl, IN(.1), IN(5.35), IN(PW-.1), IN(.2), wu, 7, t.light, italic=True)
+
+    # Right side — two columns of bullets
+    mid = max(1, len(pts) // 2)
+    col_w = (CW - .2) / 2
+    content_y = .2
+
+    lc = _rrect(sl, IN(CX), IN(content_y), IN(col_w), IN(5.2), t.light)
+    lc.line.color.rgb = LGREY; lc.line.width = Pt(.5)
+    _rect(sl, IN(CX), IN(content_y), IN(col_w), IN(.05), t.primary)
+    if pts[:mid]: _bullets(sl, IN(CX+.1), IN(content_y+.12), IN(col_w-.2), IN(5.0), pts[:mid], fs=12)
+
+    rx = CX + col_w + .2
+    rc = _rrect(sl, IN(rx), IN(content_y), IN(col_w), IN(5.2), t.light)
+    rc.line.color.rgb = LGREY; rc.line.width = Pt(.5)
+    _rect(sl, IN(rx), IN(content_y), IN(col_w), IN(.05), t.accent)
+    if pts[mid:]: _bullets(sl, IN(rx+.1), IN(content_y+.12), IN(col_w-.2), IN(5.0), pts[mid:], fs=12)
+
 def _B_timeline(prs, layout, t, sd, cn, wu, n, total):
     sl=prs.slides.add_slide(layout); _bg(sl, WHITE)
     title=sd.get('title',''); desc=sd.get('description',''); pts=sd.get('key_points',[])
@@ -531,27 +561,40 @@ def _pick_layout(sd, idx, total):
     if n == 1:     return 'title'
     if n == total: return 'closing'
 
-    # Timeline: history / journey slides
-    if any(k in title for k in ('history','timeline','journey','milestone','evolution')):
+    # Timeline: history / journey / step-by-step / process slides
+    timeline_kw = ('history', 'timeline', 'journey', 'milestone', 'evolution',
+                   'operation', 'process', 'step', 'phase', 'stage',
+                   'distribution', 'supply', 'delivery', 'logistic')
+    if any(k in title for k in timeline_kw):
         return 'timeline'
 
-    # Feature cards: strengths, USP, values, vision slides
-    if any(k in title for k in ('strength','usp','unique','value','vision','mission',
-                                  'advantage','differenti','why choose','why us')):
+    # Feature cards: distinct named items that suit a visual grid
+    cards_kw = ('strength', 'usp', 'unique', 'value', 'vision', 'mission',
+                'advantage', 'differenti', 'why choose', 'why us',
+                'product', 'service', 'offering',
+                'team', 'director', 'leadership', 'founder', 'legacy',
+                'audience', 'target', 'award', 'recogni', 'certif',
+                'geographic', 'reach', 'network', 'dealer', 'customer', 'client',
+                'brand', 'marketing', 'roadmap')
+    if any(k in title for k in cards_kw) and len(pts) >= 3:
         return 'cards'
 
     # Two-column: any slide with 6+ bullets
     if len(pts) >= 6:
         return 'twocol'
 
-    # Feature cards: product, team, award slides with 4+ bullets
-    if any(k in title for k in ('product','service','offering','team','director',
-                                  'audience','target','award','recogni','certif','roadmap')):
-        if len(pts) >= 4:
-            return 'cards'
+    # Two-column: overview, industry, growth, profile slides (text-heavy)
+    twocol_kw = ('overview', 'industry', 'business', 'profile', 'about',
+                 'growth', 'general', 'introduction')
+    if any(k in title for k in twocol_kw) and len(pts) >= 3:
+        return 'twocol'
 
     # Two-column: every 3rd content slide for variety
     if 3 <= n <= total - 2 and n % 3 == 0 and len(pts) >= 3:
+        return 'twocol'
+
+    # Two-column: every 4th slide (offset) for additional variety
+    if n % 4 == 2 and len(pts) >= 4:
         return 'twocol'
 
     return 'content'
@@ -582,7 +625,7 @@ def build_presentation(data: dict,
         },
         'bold': {
             'title':'_B_title','closing':'_B_closing','content':'_B_content',
-            'twocol':'_B_content','timeline':'_B_timeline','cards':'_B_cards',
+            'twocol':'_B_twocol','timeline':'_B_timeline','cards':'_B_cards',
         },
         'cards': {
             'title':'_C_title','closing':'_C_closing','content':'_C_content',
@@ -594,7 +637,7 @@ def build_presentation(data: dict,
         '_A_title':_A_title,'_A_closing':_A_closing,'_A_content':_A_content,
         '_A_twocol':_A_twocol,'_A_timeline':_A_timeline,'_A_cards':_A_cards,
         '_B_title':_B_title,'_B_closing':_B_closing,'_B_content':_B_content,
-        '_B_timeline':_B_timeline,'_B_cards':_B_cards,
+        '_B_twocol':_B_twocol,'_B_timeline':_B_timeline,'_B_cards':_B_cards,
         '_C_title':_C_title,'_C_closing':_C_closing,'_C_content':_C_content,
         '_C_twocol':_C_twocol,'_C_timeline':_C_timeline,'_C_feature_cards':_C_feature_cards,
     }

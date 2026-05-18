@@ -20,22 +20,25 @@ def _saturation(h):
     r,g,b = _to_rgb(h); return max(r,g,b) - min(r,g,b)
 
 def _is_brand_color(h):
-    """True if color is colorful enough to be a brand color"""
-    return 25 < _brightness(h) < 220 and _saturation(h) > 35
+    """True if color is colorful enough to be a brand color (not near-white or near-black)"""
+    return 18 < _brightness(h) < 235 and _saturation(h) > 18
 
 def _dist(h1, h2):
     r1,g1,b1 = _to_rgb(h1); r2,g2,b2 = _to_rgb(h2)
     return ((r1-r2)**2 + (g1-g2)**2 + (b1-b2)**2) ** .5
+
+def _rgb_to_hex(r, g, b) -> str:
+    return f'{int(r):02X}{int(g):02X}{int(b):02X}'
 
 
 def extract_website_colors(url: str):
     """
     Multi-strategy color extraction:
     Priority 1 — meta theme-color tag (explicitly set by web designer)
-    Priority 2 — CSS custom properties (--primary, --brand, --color)
+    Priority 2 — CSS custom properties (--primary, --brand, --color, etc.)
     Priority 3 — background colors in header/nav CSS selectors
     Priority 4 — External CSS files parsed for same
-    Priority 5 — Frequency analysis of all hex colors
+    Priority 5 — Frequency analysis of all hex and rgb colors
 
     Returns (primary_hex, accent_hex) as 6-char uppercase strings without #
     """
@@ -59,6 +62,14 @@ def extract_website_colors(url: str):
             m = re.search(pattern, html, re.I)
             if m: scored.append((100, m.group(1).upper()))
 
+        # ── meta theme-color with rgb() ────────────────────────
+        for pattern in [
+            r'<meta[^>]+name=["\']theme-color["\'][^>]+content=["\']rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)',
+            r'<meta[^>]+content=["\']rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)["\'][^>]+name=["\']theme-color',
+        ]:
+            m = re.search(pattern, html, re.I)
+            if m: scored.append((100, _rgb_to_hex(m.group(1), m.group(2), m.group(3))))
+
         # ── Priority 2+3: parse inline <style> tags ────────────
         style_blocks = re.findall(r'<style[^>]*>(.*?)</style>', html, re.I | re.DOTALL)
         full_css = '\n'.join(style_blocks)
@@ -67,7 +78,7 @@ def extract_website_colors(url: str):
         # ── Priority 4: linked CSS files ──────────────────────
         css_urls = re.findall(r'<link[^>]+rel=["\']stylesheet["\'][^>]+href=["\']([^"\']+)', html, re.I)
         css_urls += re.findall(r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']stylesheet', html, re.I)
-        for cu in css_urls[:6]:
+        for cu in css_urls[:8]:
             if not cu.startswith('http'): cu = urljoin(url, cu)
             try:
                 cr = requests.get(cu, timeout=8, headers=hdrs)
@@ -82,6 +93,12 @@ def extract_website_colors(url: str):
         for color, cnt in Counter(all_hex).most_common(30):
             if _is_brand_color(color):
                 scored.append((cnt // 5, color))
+
+        # ── Priority 5b: rgb() colors in HTML (SVG, inline style) ─
+        for m in re.finditer(r'rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)', html, re.I):
+            h = _rgb_to_hex(m.group(1), m.group(2), m.group(3))
+            if _is_brand_color(h):
+                scored.append((1, h))
 
         if not scored:
             return DEFAULT
@@ -99,7 +116,7 @@ def extract_website_colors(url: str):
         primary = valid[0]
         accent  = DEFAULT[1]
         for c in valid[1:]:
-            if _dist(primary, c) > 75:
+            if _dist(primary, c) > 60:
                 accent = c; break
 
         return primary, accent
@@ -110,20 +127,30 @@ def extract_website_colors(url: str):
 
 def _parse_css(css: str, scored: list):
     """Parse CSS text and add found colors to scored list."""
-    # CSS custom properties with primary/brand/color/theme names
+    # CSS custom properties — broad name match for primary/brand/color/theme/accent/key/logo
     for m in re.finditer(
-        r'--(?:primary|brand|main|color|theme|accent)[^:;\n]*:\s*#([0-9a-fA-F]{6})',
+        r'--(?:[a-z-]*(?:primary|brand|main|color|theme|accent|key|corporate|header|logo|ui)[a-z-]*):\s*#([0-9a-fA-F]{6})',
         css, re.I
     ):
         scored.append((90, m.group(1).upper()))
 
-    # :root color variables
+    # CSS variables with rgb() values
+    for m in re.finditer(
+        r'--(?:[a-z-]*(?:primary|brand|main|color|theme|accent|key|corporate|header|logo)[a-z-]*):\s*rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)',
+        css, re.I
+    ):
+        scored.append((90, _rgb_to_hex(m.group(1), m.group(2), m.group(3))))
+
+    # :root color variables (all hex)
     root_blocks = re.findall(r':root\s*\{([^}]+)\}', css, re.I | re.DOTALL)
     for block in root_blocks:
         for m in re.finditer(r'#([0-9a-fA-F]{6})', block):
             scored.append((85, m.group(1).upper()))
+        # :root rgb() values
+        for m in re.finditer(r'rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)', block, re.I):
+            scored.append((85, _rgb_to_hex(m.group(1), m.group(2), m.group(3))))
 
-    # Header/nav/button background colors
+    # Header/nav/button background colors — hex
     for sel_pattern in [
         r'(?:header|\.header|\.navbar|\.nav-bar|nav)[^{]*\{([^}]*)\}',
         r'(?:\.btn-primary|\.button-primary|\.cta|a\.button)[^{]*\{([^}]*)\}',
@@ -133,7 +160,17 @@ def _parse_css(css: str, scored: list):
             block = m.group(1)
             for cm in re.finditer(r'(?:background|background-color|color):\s*#([0-9a-fA-F]{6})', block, re.I):
                 scored.append((75, cm.group(1).upper()))
+            # same selectors but rgb()
+            for cm in re.finditer(
+                r'(?:background|background-color|color):\s*rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)',
+                block, re.I
+            ):
+                scored.append((75, _rgb_to_hex(cm.group(1), cm.group(2), cm.group(3))))
 
     # All hex colors in CSS (lower score)
     for m in re.finditer(r'#([0-9a-fA-F]{6})\b', css):
         scored.append((5, m.group(1).upper()))
+
+    # All rgb() in CSS (lower score)
+    for m in re.finditer(r'rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)', css, re.I):
+        scored.append((3, _rgb_to_hex(m.group(1), m.group(2), m.group(3))))
