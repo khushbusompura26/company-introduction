@@ -49,13 +49,16 @@ class Theme:
 # ── Industry → Style mapping ───────────────────────────────────
 
 def _pick_style(industry: str) -> str:
-    i = (industry or '').lower()
-    tech_kw  = ('tech','software','it ','digital','data','cloud','ai ','saas','app','internet','startup')
-    card_kw  = ('retail','food','health','medical','pharma','manufactur','real estate','construction',
-                'fmcg','consumer','hotel','hospitality','travel','restaurant','agriculture','textile')
-    if any(k in i for k in tech_kw):  return 'bold'
-    if any(k in i for k in card_kw):  return 'cards'
-    return 'professional'   # education, finance, legal, publishing, etc.
+    i = (industry or '').lower().replace('_',' ')
+    tech_kw = ('tech','software','it ','digital','data','cloud','ai ','saas','app',
+               'internet','startup','cyber','media','telecom','ecomm','e-comm')
+    card_kw = ('retail','food','health','medical','pharma','manufactur','real estate',
+               'real estate','construction','fmcg','consumer','hotel','hospitality',
+               'travel','restaurant','agriculture','textile','logistic','transport',
+               'auto','fashion','beauty','sport')
+    if any(k in i for k in tech_kw): return 'bold'
+    if any(k in i for k in card_kw): return 'cards'
+    return 'professional'
 
 
 # ── Low-level drawing helpers ──────────────────────────────────
@@ -519,12 +522,38 @@ def _C_closing(prs, layout, t, sd, data):
 # ══════════════════════════════════════════════════════════════
 
 def _pick_layout(sd, idx, total):
-    n=sd.get('slide_number', idx+1); title=sd.get('title','').lower(); pts=sd.get('key_points',[])
-    if n==1: return 'title'
-    if n==total: return 'closing'
-    if any(k in title for k in ('history','timeline','journey','mileston')): return 'timeline'
-    if any(k in title for k in ('strength','usp','value','vision','mission','why us')): return 'cards'
-    if len(pts)>6 and n%2==0: return 'twocol'
+    n     = sd.get('slide_number', idx + 1)
+    title = sd.get('title', '').lower()
+    pts   = sd.get('key_points', [])
+    stats = sd.get('stats')
+    has_stats = bool(stats and isinstance(stats, dict) and len(stats) >= 3)
+
+    if n == 1:     return 'title'
+    if n == total: return 'closing'
+
+    # Timeline: history / journey slides
+    if any(k in title for k in ('history','timeline','journey','milestone','evolution')):
+        return 'timeline'
+
+    # Feature cards: strengths, USP, values, vision slides
+    if any(k in title for k in ('strength','usp','unique','value','vision','mission',
+                                  'advantage','differenti','why choose','why us')):
+        return 'cards'
+
+    # Two-column: any slide with 6+ bullets
+    if len(pts) >= 6:
+        return 'twocol'
+
+    # Feature cards: product, team, award slides with 4+ bullets
+    if any(k in title for k in ('product','service','offering','team','director',
+                                  'audience','target','award','recogni','certif','roadmap')):
+        if len(pts) >= 4:
+            return 'cards'
+
+    # Two-column: every 3rd content slide for variety
+    if 3 <= n <= total - 2 and n % 3 == 0 and len(pts) >= 3:
+        return 'twocol'
+
     return 'content'
 
 
