@@ -8,7 +8,7 @@ from urllib.parse import urljoin
 
 # ── Website content scraper ─────────────────────────────────────
 
-def _scrape_website_text(url: str, max_chars: int = 6000) -> str:
+def _scrape_website_text(url: str, max_chars: int = 10000) -> str:
     """
     Fetch the homepage (and /about page if found) and return clean plain text.
     Used as grounding context for the AI to prevent hallucination.
@@ -30,17 +30,18 @@ def _scrape_website_text(url: str, max_chars: int = 6000) -> str:
         return text.strip()
 
     pages_to_try = [url]
-    # Try to also scrape /about or /about-us
-    for suffix in ('/about', '/about-us', '/company', '/our-story'):
+    # Try common about page paths — including Shopify (/pages/about-us) and WordPress (/about) patterns
+    for suffix in ('/pages/about-us', '/pages/about', '/about-us', '/about',
+                   '/company', '/our-story', '/pages/our-story', '/pages/company'):
         pages_to_try.append(urljoin(url.rstrip('/') + '/', suffix.lstrip('/')))
 
-    for page_url in pages_to_try[:3]:
+    for page_url in pages_to_try[:5]:
         try:
             r = requests.get(page_url, timeout=10, headers=hdrs, allow_redirects=True)
             if r.status_code == 200:
                 text = _clean(r.text)
                 if len(text) > 200:
-                    collected.append(f"[PAGE: {page_url}]\n{text[:3000]}")
+                    collected.append(f"[PAGE: {page_url}]\n{text[:4000]}")
         except Exception:
             pass
 
