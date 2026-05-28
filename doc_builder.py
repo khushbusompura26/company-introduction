@@ -128,8 +128,12 @@ def build_script_document(data: dict) -> bytes:
 
         _para(doc, script, size=12, color=DARK, space_after=4)
 
-        # Speaking time
-        _para(doc, '\u23f1  Estimated speaking time: \u223c50 seconds (1 min)',
+        # Speaking time \u2014 calculated from word count at 130 wpm
+        word_count = len(script.split())
+        secs = max(30, round((word_count / 130) * 60))
+        mins = secs // 60; rem = secs % 60
+        time_str = f'{mins}m {rem}s' if mins else f'{rem}s'
+        _para(doc, f'\u23f1  Estimated speaking time: ~{time_str}  ({word_count} words @ 130 wpm)',
               size=10, color=GREY, italic=True, space_after=16)
 
     # ── Production notes ───────────────────────────────────────

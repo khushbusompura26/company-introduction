@@ -8,9 +8,10 @@ from urllib.parse import urljoin
 
 # ── Website content scraper ─────────────────────────────────────
 
-def _scrape_website_text(url: str, max_chars: int = 10000) -> str:
+def _scrape_website_text(url: str, max_chars: int = 18000) -> str:
     """
-    Fetch the homepage (and /about page if found) and return clean plain text.
+    Fetch the homepage + multiple key pages and return clean plain text.
+    Tries homepage, about, team, products/services, contact, catalogue pages.
     Used as grounding context for the AI to prevent hallucination.
     """
     UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -29,19 +30,33 @@ def _scrape_website_text(url: str, max_chars: int = 10000) -> str:
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text.strip()
 
-    pages_to_try = [url]
-    # Try common about page paths — including Shopify (/pages/about-us) and WordPress (/about) patterns
-    for suffix in ('/pages/about-us', '/pages/about', '/about-us', '/about',
-                   '/company', '/our-story', '/pages/our-story', '/pages/company'):
-        pages_to_try.append(urljoin(url.rstrip('/') + '/', suffix.lstrip('/')))
+    base = url.rstrip('/')
+    # Comprehensive list: homepage first, then all key pages
+    # Covers Shopify (/pages/*), WordPress (/about, /team), standard (/services, /products)
+    suffixes = [
+        '',                     # homepage
+        '/pages/about-us', '/pages/about', '/pages/our-story', '/pages/company',
+        '/about-us', '/about', '/our-story', '/company',
+        '/team', '/our-team', '/pages/team', '/pages/our-team', '/leadership',
+        '/services', '/products', '/catalogue', '/catalog',
+        '/pages/services', '/pages/products', '/pages/catalogue',
+        '/contact', '/contact-us', '/pages/contact', '/pages/contact-us',
+    ]
 
-    for page_url in pages_to_try[:5]:
+    visited = set()
+    for suffix in suffixes:
+        page_url = base + suffix if suffix else url
+        if page_url in visited:
+            continue
+        visited.add(page_url)
         try:
             r = requests.get(page_url, timeout=10, headers=hdrs, allow_redirects=True)
             if r.status_code == 200:
                 text = _clean(r.text)
-                if len(text) > 200:
+                if len(text) > 300:
                     collected.append(f"[PAGE: {page_url}]\n{text[:4000]}")
+                    if len('\n\n'.join(collected)) >= max_chars:
+                        break
         except Exception:
             pass
 
@@ -51,31 +66,38 @@ def _scrape_website_text(url: str, max_chars: int = 10000) -> str:
 
 # ── System prompt ────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are a corporate presentation designer creating an introduction deck for an Indian business.
+SYSTEM_PROMPT = """You are a corporate presentation designer creating a comprehensive, detailed introduction deck for an Indian business.
 
 ═══════════════════════════════════════════════════
 ACCURACY RULES — STRICTLY FOLLOW — NO EXCEPTIONS
 ═══════════════════════════════════════════════════
-1. USE ONLY VERIFIED FACTS — information from the website content provided, or facts you are 100% certain about from well-known public sources.
-2. DO NOT INVENT OR ESTIMATE — never fabricate specific numbers, revenue figures, employee counts, dealer counts, award names, founding years, or statistics.
-3. WHEN IN DOUBT → use "—" as the value. It is better to show "—" than a wrong number.
-4. SMALL / UNKNOWN COMPANIES — if the company is not well-known and the website does not mention a specific fact, describe what they DO (their service/product) rather than making up metrics.
-5. HISTORY SLIDES — only include years and events you are CERTAIN about. If fewer than 4 real events are known, use fewer bullet points. Do NOT invent milestones.
-6. STATS FIELDS — only fill stats with real values found in the website content or widely known public data. If no real stats are available, set "stats": null.
-7. CONTACT DETAILS — use only what appears on the website. Never invent phone numbers or emails.
+1. USE ONLY VERIFIED FACTS — information from the website content provided, or facts you are 100% certain about.
+2. DO NOT INVENT OR ESTIMATE — never fabricate numbers, revenue, employee counts, dealer counts, award names, founding years, or statistics.
+3. WHEN IN DOUBT → use "—". It is better to show "—" than a wrong number.
+4. SMALL / UNKNOWN COMPANIES — describe what they DO rather than inventing metrics.
+5. HISTORY SLIDES — only include years/events you are CERTAIN about. Do NOT invent milestones.
+6. STATS FIELDS — only fill with real values from the website. If unavailable, set "stats": null.
+7. CONTACT DETAILS — use only what appears on the website. Never invent phone/email.
+
+CONTENT DEPTH RULES — EVERY SLIDE MUST BE RICH AND COMPLETE:
+- key_points: 6-8 per slide. Each point must be 20-35 words — detailed, informative, with context. NOT one-liners.
+- description: 4-6 sentences. Thorough, informative, reads like a professional paragraph.
+- script: 200-280 words per slide. Conversational Hinglish narration — professional Indian corporate video style. Detailed enough that anyone can record directly without adding anything.
+- stats: Include whenever real data is available — founding year, team size, product count, cities, etc.
+- Every slide must feel COMPLETE and CONTENT-RICH — no sparse or minimal slides.
 
 OUTPUT RULES:
 - Return ONLY a raw JSON object. Start with { end with }
 - No markdown code blocks, no ```json
 - ALL string values on ONE line — no real newlines inside strings
 - NO markdown in values — plain text only
-- key_points: under 20 words each
-- script: under 120 words, conversational Hinglish
 
 BRAND COLORS:
-- Look at the website content for clues about colors (logo descriptions, hex codes, color names)
-- For well-known brands you recognise, use their actual brand colors
-- If genuinely unknown, suggest a professional color appropriate for the industry
+- Look at website content for hex codes, color names, logo descriptions
+- For well-known brands, use their actual brand colors
+- If unknown, suggest a professional color for the industry
+
+SLIDE COUNT: Create between 15-25 slides based on available data. If a topic has rich data, split into Part 1 and Part 2. If a topic has little data, keep it brief or merge. Let the data drive the slide count naturally. Minimum 15 slides.
 
 Return this EXACT JSON structure:
 {
@@ -90,34 +112,36 @@ Return this EXACT JSON structure:
     {
       "slide_number": 1,
       "title": "Slide Title",
-      "key_points": ["Verified fact 1", "Verified fact 2", "Verified fact 3"],
-      "description": "2-3 sentences using only verified or website-sourced facts.",
+      "key_points": ["Detailed point 1 with full context and explanation — 20-35 words", "Detailed point 2"],
+      "description": "4-6 sentence thorough description using only verified or website-sourced facts.",
       "stats": {"Label": "Value"},
-      "script": "Hinglish narration under 120 words."
+      "script": "Detailed Hinglish narration 200-280 words. Conversational, professional, record-ready."
     }
   ],
-  "production_notes": {"total_runtime": "20 minutes", "pace": "140 wpm", "music_suggestion": "Light instrumental", "recording_tips": "Quiet room"}
+  "production_notes": {"total_runtime": "25-35 minutes", "pace": "130-140 wpm", "music_suggestion": "Light corporate instrumental", "recording_tips": "Quiet room, professional mic, natural conversational pace, pause between slides"}
 }
 
-Create exactly 18 slides:
-1.  Title Slide — company name, tagline, key stats (only verified ones)
-2.  Company Overview — founding year, HQ, what they do, team size if known
-3.  Industry and Business Type — sector, B2B/B2C, business model
-4.  Founder and Legacy — founder name and story (only if known/verifiable)
-5.  Directors and Team — leadership names if available, else describe team culture
-6.  Company History Part 1 — key_points format: "YEAR: event" — ONLY VERIFIED events
-7.  Company History Part 2 — key_points format: "YEAR: event" — ONLY VERIFIED events
-8.  Operations and Process — how they deliver their product/service (can be general)
-9.  Customers and Dealer Network — client types and regions (general if specifics unknown)
-10. Distribution Network — how products/services reach customers
-11. Geographic Reach — states/cities served (only if verifiable, else describe scope)
-12. Vision Mission Values — key_points format: "VISION: text", "MISSION: text", "VALUE: text"
-13. Target Audience — customer personas, demographics
-14. Key Strengths and USP — key_points format: "Strength Name: explanation"
-15. Company Growth — growth story with real data; if unavailable describe trajectory
-16. Products and Services — actual product/service catalog from website
-17. Brand and Marketing — online presence, campaigns if known
-18. Contact and Closing — real contact details from website
+CREATE SLIDES IN THIS SEQUENCE — adjust count per topic based on available data:
+
+1.  Title Slide — company name, tagline, website, contact info. Stats: most impressive verified numbers (years in business, products/services count, cities, clients, etc.)
+2.  Company Overview — detailed description of what company does. Fact cards: founded, HQ, size, website, email, phone, social media handles
+3.  Industry & Business Type — industry classification, sector, B2B/B2C/both, business model, nature of operations, business segments
+4.  Our Founder & Legacy — who founded it, when, why, their background and personal story, what inspired them. Only verified info — use "—" if not on website
+5.  Directors / Owners & Team — current leadership/owners, key team departments and what each does, team size and culture
+6.  Company History Part 1 — key_points format: "YEAR: detailed event description" — decade-by-decade from founding. ONLY VERIFIED milestones
+7.  Company History Part 2 — key_points format: "YEAR: detailed event description" — continued to present day (include if enough verified data exists)
+8.  Operations & Service Delivery — step-by-step how the company creates and delivers its product/service: facilities, process, quality, logistics
+9.  Customers Served & Dealer Network — who the customers are (types, segments, industries), dealer/partner/franchise network, key customer statistics
+10. Distribution Network & Digital Presence — physical distribution (offices, branches, agents, distributors) + all digital channels (website, app, social media, e-commerce, WhatsApp)
+11. Geographic Reach — cities, states, countries served. Primary vs secondary markets. Export or international presence if any
+12. Vision, Mission & Values — key_points format: "VISION: full statement", "MISSION: full statement", "VALUE: name — detailed explanation". Give full detailed statements
+13. Target Audience — detailed customer personas: who they are, demographics, what they need, why they choose this company, which products they use
+14. Key Strengths & USP — key_points format: "Strength Name: detailed explanation of why this is a real differentiator" — minimum 6 genuine strengths with real explanations
+15. Company Growth & Scale — growth story with real data if available; metric cards showing scale; narrative of how company has grown
+16. Products & Services Part 1 — complete detailed breakdown: every product/service category with descriptions, variants, who each is for
+17. Products & Services Part 2 — continued catalog (create this slide if the product/service range is large)
+[Add any additional slides relevant to this specific company based on website data — examples: Awards & Recognition, CSR Initiatives, Technology & Innovation, Future Roadmap, Customer Testimonials, Brand & Marketing, Digital Platform Features, etc.]
+Last Slide: Contact & Closing — all contact details, social media handles, all addresses, closing tagline
 
 RETURN ONLY VALID JSON"""
 
@@ -188,7 +212,7 @@ def research_company(company_name: str, website_url: str, api_key: str,
         'X-Title': 'Company Introduction Generator'
     }
     payload = {
-        'model': model, 'max_tokens': 16000, 'temperature': 0.1,
+        'model': model, 'max_tokens': 32000, 'temperature': 0.1,
         'messages': [
             {'role': 'system', 'content': SYSTEM_PROMPT},
             {'role': 'user',   'content': user_message},
