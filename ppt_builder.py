@@ -27,6 +27,39 @@ def _adaptive_fs(text: str, base_fs: float, ideal_chars: int = 8) -> float:
     return max(8.0, base_fs * (ideal_chars / n) ** 0.65)
 
 
+def _card_fs(text: str, base_fs: float, ideal_chars: int = 55) -> float:
+    """Scale card text font so it fits inside card boundaries."""
+    n = len(str(text))
+    if n <= ideal_chars:
+        return base_fs
+    return max(7.0, base_fs * (ideal_chars / n) ** 0.55)
+
+
+def _smart_card_split(point: str):
+    """
+    Split a key_point into (header, body) for card display.
+    Priority: colon separator → first sentence → first 5 words as header.
+    """
+    b = str(point).strip()
+    if ':' in b:
+        hdr, body = b.split(':', 1)
+        return hdr.strip()[:55], body.strip()
+    # Use first sentence as header if short enough
+    sentences = b.split('. ')
+    if len(sentences) >= 2 and len(sentences[0]) <= 70:
+        return sentences[0].strip(), '. '.join(sentences[1:]).strip()
+    # Fall back: first 5 words as header
+    words = b.split()
+    hdr = ' '.join(words[:5])
+    return hdr, b
+
+
+def _truncate(text: str, max_chars: int = 200) -> str:
+    """Truncate body text to prevent extreme card overflow."""
+    text = str(text)
+    return text[:max_chars].rstrip() + '…' if len(text) > max_chars else text
+
+
 def _founding_year(stats: dict) -> str:
     """Try to extract a founding year label from the stats dict."""
     if not stats:
@@ -199,17 +232,20 @@ def _A_cards(prs, layout, t, sd, cn, wu, n, total):
     title=sd.get('title',''); desc=sd.get('description',''); pts=sd.get('key_points',[])
     _txt(sl, IN(.35), IN(.36), IN(9.3), IN(.72), title, 31, t.primary, bold=True, fname='Georgia', wrap=True)
     has_desc=bool(desc)
-    if has_desc: _txt(sl, IN(.35), IN(1.1), IN(9.3), IN(.44), desc, 11.5, GREY, italic=True, wrap=True)
+    if has_desc: _txt(sl, IN(.35), IN(1.1), IN(9.3), IN(.44), desc[:180], 11, GREY, italic=True, wrap=True)
     sy=1.60 if has_desc else 1.30
-    feats=[(b.split(':',1)[0].strip(), b.split(':',1)[1].strip()) if ':' in b else (b[:35], b) for b in pts]
+    feats=[_smart_card_split(b) for b in pts]
     cols=3; rows=(len(feats)+cols-1)//cols
     cw=(9.3-.2*(cols-1))/cols; ch=(3.6-.18*(rows-1))/max(rows,1)
     for i,(hdr,bdy) in enumerate(feats[:cols*rows]):
         r=i//cols; c=i%cols; x=.35+c*(cw+.2); y=sy+r*(ch+.18)
+        bdy_display = _truncate(bdy, 160)
         card=_rrect(sl, IN(x), IN(y), IN(cw), IN(ch), t.light); card.line.color.rgb=LGREY; card.line.width=Pt(.5)
         _rect(sl, IN(x), IN(y), IN(cw), IN(.06), t.accent)
-        _txt(sl, IN(x+.12), IN(y+.10), IN(cw-.24), IN(.36), hdr, 11.5, t.primary, bold=True, wrap=True)
-        _txt(sl, IN(x+.12), IN(y+.46), IN(cw-.24), IN(ch-.58), bdy, 10.5, DARK, wrap=True)
+        hdr_fs = _card_fs(hdr, 11.0, ideal_chars=40)
+        bdy_fs = _card_fs(bdy_display, 10.0, ideal_chars=90)
+        _txt(sl, IN(x+.12), IN(y+.10), IN(cw-.24), IN(.38), hdr, hdr_fs, t.primary, bold=True, wrap=True)
+        _txt(sl, IN(x+.12), IN(y+.48), IN(cw-.24), IN(ch-.60), bdy_display, bdy_fs, DARK, wrap=True)
 
 def _A_title(prs, layout, t, sd, data):
     sl=prs.slides.add_slide(layout); cn=data.get('company_name',''); wu=data.get('website','')
@@ -226,7 +262,9 @@ def _A_title(prs, layout, t, sd, data):
                 a=etree.SubElement(srgb,qn('a:alpha')); a.set('val','7000')
     _txt(sl, IN(.5), IN(.4), IN(9), IN(.32), cn.upper(), 9, t.accent, bold=True, align=PP_ALIGN.CENTER)
     _txt(sl, IN(.5), IN(.78), IN(9), IN(1.4), cn, 44, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia', wrap=True)
-    tag=sd.get('description') or data.get('tagline','')
+    # Title slide: always use short tagline — never the long description
+    tag = data.get('tagline', '') or ''
+    tag = tag[:160]  # hard cap to prevent overflow
     if tag: _txt(sl, IN(.8), IN(2.26), IN(8.4), IN(.55), tag, 15, WHITE, italic=True, align=PP_ALIGN.CENTER, wrap=True)
     _txt(sl, IN(2.5), IN(2.86), IN(5), IN(.26), '\u00b7  '*11, 13, t.accent, align=PP_ALIGN.CENTER)
     stats=sd.get('stats')
@@ -357,17 +395,20 @@ def _B_cards(prs, layout, t, sd, cn, wu, n, total):
     _txt(sl, IN(.15), IN(.1), IN(PW-.2), IN(.22), f'{n}/{total}', 8, t.light, align=PP_ALIGN.RIGHT)
     _txt(sl, IN(.15), IN(.35), IN(PW-.2), IN(.22), cn.upper(), 7.5, t.light, bold=True)
     _txt(sl, IN(.15), IN(.8), IN(PW-.25), IN(2.0), title, 22, WHITE, bold=True, fname='Georgia', wrap=True)
-    if desc: _txt(sl, IN(.15), IN(2.9), IN(PW-.25), IN(1.5), desc, 9.5, t.light, italic=True, wrap=True)
+    if desc: _txt(sl, IN(.15), IN(2.9), IN(PW-.25), IN(1.5), desc[:180], 9.5, t.light, italic=True, wrap=True)
     _txt(sl, IN(.1), IN(5.35), IN(PW-.1), IN(.2), wu, 7, t.light, italic=True)
-    feats=[(b.split(':',1)[0].strip(), b.split(':',1)[1].strip()) if ':' in b else (b[:28], b) for b in pts]
+    feats=[_smart_card_split(b) for b in pts]
     cols=2; rows=(len(feats)+cols-1)//cols
     cw=(CW-.15*(cols-1))/cols; ch=(5.4-.18*(rows-1))/max(rows,1)
     for i,(hdr,bdy) in enumerate(feats[:cols*rows]):
         r=i//cols; c=i%cols; x=CX+c*(cw+.15); y=.15+r*(ch+.18)
+        bdy_display = _truncate(bdy, 160)
         card=_rrect(sl, IN(x), IN(y), IN(cw), IN(ch), t.light); card.line.color.rgb=LGREY; card.line.width=Pt(.5)
         _rect(sl, IN(x), IN(y), IN(cw), IN(.06), t.accent)
-        _txt(sl, IN(x+.1), IN(y+.1), IN(cw-.2), IN(.35), hdr, 11, t.primary, bold=True, wrap=True)
-        _txt(sl, IN(x+.1), IN(y+.46), IN(cw-.2), IN(ch-.58), bdy, 10, DARK, wrap=True)
+        hdr_fs = _card_fs(hdr, 10.5, ideal_chars=40)
+        bdy_fs = _card_fs(bdy_display, 9.5, ideal_chars=90)
+        _txt(sl, IN(x+.1), IN(y+.1), IN(cw-.2), IN(.38), hdr, hdr_fs, t.primary, bold=True, wrap=True)
+        _txt(sl, IN(x+.1), IN(y+.48), IN(cw-.2), IN(ch-.60), bdy_display, bdy_fs, DARK, wrap=True)
 
 def _B_title(prs, layout, t, sd, data):
     sl=prs.slides.add_slide(layout); cn=data.get('company_name',''); wu=data.get('website','')
@@ -382,7 +423,9 @@ def _B_title(prs, layout, t, sd, data):
     if found_yr:
         _txt(sl, IN(.3), IN(.4), IN(4.6), IN(.3), f'EST. {found_yr}', 9, t.light, bold=True, fname='Calibri')
     _txt(sl, IN(.3), IN(.8 if found_yr else .55), IN(4.6), IN(2.2), cn, 38, t.accent, bold=True, fname='Georgia', wrap=True)
-    tag=sd.get('description') or data.get('tagline','')
+    # Title slide: always use short tagline only
+    tag = data.get('tagline', '') or ''
+    tag = tag[:160]
     if tag: _txt(sl, IN(.3), IN(3.15), IN(4.6), IN(.9), tag, 13, WHITE, italic=True, wrap=True)
     _txt(sl, IN(.3), IN(4.55), IN(4.6), IN(.3), wu, 10, t.light, italic=True)
     # Right side — tagline at top
@@ -517,16 +560,19 @@ def _C_feature_cards(prs, layout, t, sd, cn, wu, n, total):
     tc=_rrect(sl, IN(.22), IN(.3), IN(9.56), IN(.9), WHITE); tc.line.color.rgb=LGREY; tc.line.width=Pt(.5)
     _rect(sl, IN(.22), IN(.3), IN(.1), IN(.9), t.primary)
     _txt(sl, IN(.45), IN(.34), IN(9.0), IN(.5), title, 26, t.primary, bold=True, fname='Georgia', wrap=True)
-    if desc: _txt(sl, IN(.45), IN(.75), IN(9.0), IN(.4), desc, 10.5, GREY, italic=True, wrap=True)
-    feats=[(b.split(':',1)[0].strip(), b.split(':',1)[1].strip()) if ':' in b else (b[:28], b) for b in pts]
+    if desc: _txt(sl, IN(.45), IN(.75), IN(9.0), IN(.4), desc[:180], 10.5, GREY, italic=True, wrap=True)
+    feats=[_smart_card_split(b) for b in pts]
     cols=3; rows=(len(feats)+cols-1)//cols
     cw=(9.56-.18*(cols-1))/cols; ch=(3.78-.18*(rows-1))/max(rows,1)
     for i,(hdr,bdy) in enumerate(feats[:cols*rows]):
         r=i//cols; c=i%cols; x=.22+c*(cw+.18); y=1.32+r*(ch+.18)
+        bdy_display = _truncate(bdy, 160)
         card=_rrect(sl, IN(x), IN(y), IN(cw), IN(ch), WHITE); card.line.color.rgb=LGREY; card.line.width=Pt(.5)
         _rect(sl, IN(x), IN(y), IN(cw), IN(.07), t.primary if i%3==0 else t.accent if i%3==1 else t.dark_bg)
-        _txt(sl, IN(x+.1), IN(y+.11), IN(cw-.2), IN(.35), hdr, 11.5, t.primary, bold=True, wrap=True)
-        _txt(sl, IN(x+.1), IN(y+.47), IN(cw-.2), IN(ch-.58), bdy, 10.5, DARK, wrap=True)
+        hdr_fs = _card_fs(hdr, 11.0, ideal_chars=40)
+        bdy_fs = _card_fs(bdy_display, 10.0, ideal_chars=90)
+        _txt(sl, IN(x+.1), IN(y+.11), IN(cw-.2), IN(.38), hdr, hdr_fs, t.primary, bold=True, wrap=True)
+        _txt(sl, IN(x+.1), IN(y+.49), IN(cw-.2), IN(ch-.60), bdy_display, bdy_fs, DARK, wrap=True)
 
 def _C_title(prs, layout, t, sd, data):
     sl=prs.slides.add_slide(layout); cn=data.get('company_name',''); wu=data.get('website','')
@@ -538,7 +584,9 @@ def _C_title(prs, layout, t, sd, data):
     _txt(sl, IN(.5), IN(.4), IN(9), IN(1.6), cn, 46, t.primary, bold=True, align=PP_ALIGN.CENTER, fname='Georgia', wrap=True)
     # Accent underline
     _rect(sl, IN(3.0), IN(2.1), IN(4.0), IN(.06), t.accent)
-    tag=sd.get('description') or data.get('tagline','')
+    # Title slide: always use short tagline only
+    tag = data.get('tagline', '') or ''
+    tag = tag[:160]
     if tag: _txt(sl, IN(.8), IN(2.25), IN(8.4), IN(.55), tag, 15, GREY, italic=True, align=PP_ALIGN.CENTER, wrap=True)
     # Stats cards row
     stats=sd.get('stats')

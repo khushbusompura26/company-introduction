@@ -23,6 +23,18 @@ def _is_brand_color(h):
     """True if color is colorful enough to be a brand color (not near-white or near-black)"""
     return 18 < _brightness(h) < 235 and _saturation(h) > 18
 
+def _is_structural_color(h):
+    """
+    Looser check for high-priority structural colors (header, nav, meta theme-color).
+    Allows dark/near-black colors — e.g. a site with a black header should get black as primary.
+    Excludes only pure white and colors with near-zero saturation that look like greys.
+    """
+    b = _brightness(h)
+    s = _saturation(h)
+    if b > 230:           return False  # near-white — skip
+    if b < 20 and s < 10: return False  # pure grey-black with no saturation — skip
+    return True
+
 def _dist(h1, h2):
     r1,g1,b1 = _to_rgb(h1); r2,g2,b2 = _to_rgb(h2)
     return ((r1-r2)**2 + (g1-g2)**2 + (b1-b2)**2) ** .5
@@ -104,18 +116,24 @@ def extract_website_colors(url: str):
             return DEFAULT
 
         # Sort by score descending, deduplicate, filter
+        # High-priority sources (score >= 50): use looser structural check — allows dark/black header colors
+        # Low-priority sources (score < 50): use strict brand color check — avoid noise
         scored.sort(key=lambda x: -x[0])
         seen = set(); valid = []
-        for _, c in scored:
-            if c not in seen and _is_brand_color(c):
-                seen.add(c); valid.append(c)
+        for score, c in scored:
+            if c in seen: continue
+            seen.add(c)
+            if score >= 50:
+                if _is_structural_color(c): valid.append((score, c))
+            else:
+                if _is_brand_color(c): valid.append((score, c))
 
         if not valid:
             return DEFAULT
 
-        primary = valid[0]
+        primary = valid[0][1]
         accent  = DEFAULT[1]
-        for c in valid[1:]:
+        for _, c in valid[1:]:
             if _dist(primary, c) > 60:
                 accent = c; break
 
