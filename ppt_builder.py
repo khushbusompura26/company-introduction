@@ -1,8 +1,14 @@
 """
-ppt_builder.py — 3 distinct PPT design styles, auto-selected by industry
-Style A: Professional (Education, Finance, Legal)
-Style B: Bold Split Panel (Technology, IT, Consulting)
-Style C: Clean Cards (Retail, Manufacturing, Healthcare, Food)
+ppt_builder.py — Reference-matched PPT design
+Closely follows the Shivalal Agarwala reference presentation:
+  · Full-width navy header bar with title inside
+  · Alternating White / Light-blue backgrounds
+  · Dark navy hero slides for founder / vision / growth
+  · Timeline with vertical line + year badges
+  · 3-column card grid with dark headers
+  · Two-column label:value layout
+  · Stats bar at bottom of title slide
+  · Consistent footer on every slide
 """
 
 import io
@@ -12,60 +18,50 @@ from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 from pptx.enum.shapes import MSO_SHAPE
 
-WHITE = RGBColor(0xFF, 0xFF, 0xFF)
-DARK  = RGBColor(0x1E, 0x2A, 0x3A)
-GREY  = RGBColor(0x64, 0x74, 0x8B)
-LGREY = RGBColor(0xE2, 0xE8, 0xF2)
-IN    = Inches
+# ── Palette (from reference PPT) ──────────────────────────────
+WHITE  = RGBColor(0xFF, 0xFF, 0xFF)
+DARK   = RGBColor(0x2D, 0x37, 0x48)   # body text
+GREY   = RGBColor(0x71, 0x80, 0x96)   # secondary text
+LGREY  = RGBColor(0xE2, 0xE8, 0xF2)   # divider lines
+SBLU   = RGBColor(0x8E, 0xA8, 0xC8)   # stat labels / footer text
+CREAM  = RGBColor(0xF5, 0xE6, 0xC0)   # header subtitle text
+LBLU   = RGBColor(0xF4, 0xF7, 0xFB)   # light slide background
+FTBG   = RGBColor(0x0A, 0x18, 0x30)   # footer bar background
+IN     = Inches
 
 
-def _adaptive_fs(text: str, base_fs: float, ideal_chars: int = 8) -> float:
-    """Scale font size down so long stat values don't overflow their card."""
+# ── Helpers ────────────────────────────────────────────────────
+
+def _adaptive_fs(text, base_fs, ideal_chars=8):
     n = len(str(text))
-    if n <= ideal_chars:
-        return base_fs
+    if n <= ideal_chars: return base_fs
     return max(8.0, base_fs * (ideal_chars / n) ** 0.65)
 
-
-def _card_fs(text: str, base_fs: float, ideal_chars: int = 55) -> float:
-    """Scale card text font so it fits inside card boundaries."""
+def _card_fs(text, base_fs, ideal_chars=55):
     n = len(str(text))
-    if n <= ideal_chars:
-        return base_fs
+    if n <= ideal_chars: return base_fs
     return max(7.0, base_fs * (ideal_chars / n) ** 0.55)
 
-
-def _smart_card_split(point: str):
-    """
-    Split a key_point into (header, body) for card display.
-    Priority: colon separator → first sentence → first 5 words as header.
-    """
+def _smart_split(point):
+    """Split key_point into (header, body) for card/row display."""
     b = str(point).strip()
     if ':' in b:
         hdr, body = b.split(':', 1)
-        return hdr.strip()[:55], body.strip()
-    # Use first sentence as header if short enough
+        return hdr.strip()[:60], body.strip()
     sentences = b.split('. ')
     if len(sentences) >= 2 and len(sentences[0]) <= 70:
         return sentences[0].strip(), '. '.join(sentences[1:]).strip()
-    # Fall back: first 5 words as header
     words = b.split()
-    hdr = ' '.join(words[:5])
-    return hdr, b
+    return ' '.join(words[:5]), b
 
-
-def _truncate(text: str, max_chars: int = 200) -> str:
-    """Truncate body text to prevent extreme card overflow."""
+def _clip(text, n):
     text = str(text)
-    return text[:max_chars].rstrip() + '…' if len(text) > max_chars else text
+    return text[:n].rstrip() + '…' if len(text) > n else text
 
-
-def _founding_year(stats: dict) -> str:
-    """Try to extract a founding year label from the stats dict."""
-    if not stats:
-        return ''
+def _founding_year(stats):
+    if not stats: return ''
     for k, v in stats.items():
-        if any(w in k.lower() for w in ('found', 'established', 'estab', 'incorp', 'since', 'year')):
+        if any(w in k.lower() for w in ('found','established','estab','incorp','since','year')):
             return str(v)
     return ''
 
@@ -73,16 +69,16 @@ def _founding_year(stats: dict) -> str:
 # ── Theme ──────────────────────────────────────────────────────
 
 class Theme:
-    def __init__(self, primary_hex='1B3A6B', accent_hex='C8A951'):
+    def __init__(self, primary_hex='1A2E5A', accent_hex='C9962B'):
         self.primary_hex = primary_hex.upper().lstrip('#')
         self.accent_hex  = accent_hex.upper().lstrip('#')
         self.primary  = self._rgb(self.primary_hex)
         self.accent   = self._rgb(self.accent_hex)
-        self.light    = self._lighten(self.primary_hex, 0.91)
-        self.dark_bg  = self._darken(self.primary_hex,  0.52)
-        self.card_bg  = self._darken(self.primary_hex,  0.38)
-        self.chrome   = self._lighten(self.primary_hex, 0.50)
-        self.bg_warm  = self._lighten(self.primary_hex, 0.95)
+        self.dark_bg  = self._darken(self.primary_hex, 0.60)
+        self.darker   = self._darken(self.primary_hex, 0.40)
+        self.card_hdr = self._darken(self.primary_hex, 0.65)
+        self.chrome   = self._lighten(self.primary_hex, 0.55)
+        self.soft     = self._lighten(self.primary_hex, 0.88)
 
     @staticmethod
     def _rgb(h):
@@ -97,35 +93,20 @@ class Theme:
         return RGBColor(int(r*f), int(g*f), int(b*f))
 
 
-# ── Industry → Style mapping ───────────────────────────────────
-
-def _pick_style(industry: str) -> str:
-    i = (industry or '').lower().replace('_',' ')
-    tech_kw = ('tech','software','it ','digital','data','cloud','ai ','saas','app',
-               'internet','startup','cyber','media','telecom','ecomm','e-comm')
-    card_kw = ('retail','food','health','medical','pharma','manufactur','real estate',
-               'real estate','construction','fmcg','consumer','hotel','hospitality',
-               'travel','restaurant','agriculture','textile','logistic','transport',
-               'auto','fashion','beauty','sport')
-    if any(k in i for k in tech_kw): return 'bold'
-    if any(k in i for k in card_kw): return 'cards'
-    return 'professional'
-
-
-# ── Low-level drawing helpers ──────────────────────────────────
+# ── Low-level drawing ──────────────────────────────────────────
 
 def _rect(sl, l, t, w, h, fill, line=None, lw=Pt(0)):
     sh = sl.shapes.add_shape(MSO_SHAPE.RECTANGLE, l, t, w, h)
     sh.fill.solid(); sh.fill.fore_color.rgb = fill
     if line: sh.line.color.rgb = line; sh.line.width = lw or Pt(1)
-    else: sh.line.fill.background()
+    else:    sh.line.fill.background()
     return sh
 
-def _rrect(sl, l, t, w, h, fill, line=None, lw=Pt(1.5)):
+def _rrect(sl, l, t, w, h, fill, line=None, lw=Pt(1.2)):
     sh = sl.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, l, t, w, h)
     sh.fill.solid(); sh.fill.fore_color.rgb = fill
     if line: sh.line.color.rgb = line; sh.line.width = lw
-    else: sh.line.fill.background()
+    else:    sh.line.fill.background()
     return sh
 
 def _txt(sl, l, t, w, h, text, fs, color,
@@ -139,596 +120,665 @@ def _txt(sl, l, t, w, h, text, fs, color,
     r.font.bold = bold; r.font.italic = italic; r.font.name = fname
     return tb
 
-def _bullets(sl, l, t, w, h, items, fs=13, color=None):
-    color = color or DARK
+def _multi_txt(sl, l, t, w, h, items, fs, color, line_gap=4, fname='Calibri'):
+    """Multi-line text box — each item is a paragraph."""
     tb = sl.shapes.add_textbox(l, t, w, h)
     tf = tb.text_frame; tf.word_wrap = True
     for i, item in enumerate(items):
-        p = tf.paragraphs[0] if i==0 else tf.add_paragraph()
-        p.space_after = Pt(4)
-        r = p.add_run(); r.text = '\u25b8  ' + str(item)
-        r.font.size = Pt(fs); r.font.color.rgb = color; r.font.name = 'Calibri'
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.space_after = Pt(line_gap)
+        r = p.add_run(); r.text = '▸  ' + str(item)
+        r.font.size = Pt(fs); r.font.color.rgb = color; r.font.name = fname
     return tb
 
 def _bg(sl, color):
-    sl.background.fill.solid(); sl.background.fill.fore_color.rgb = color
+    sl.background.fill.solid()
+    sl.background.fill.fore_color.rgb = color
+
+
+# ── Shared components ──────────────────────────────────────────
+
+def _header(sl, t, title, subtitle=''):
+    """Full-width header bar — identical to reference PPT."""
+    _rect(sl, IN(0),   IN(0),    IN(10), IN(1.15), t.primary)
+    _rect(sl, IN(0),   IN(1.15), IN(10), IN(0.07), t.accent)
+    _txt(sl, IN(0.4), IN(0.10), IN(9.2), IN(0.65),
+         title, 30, WHITE, bold=True, fname='Georgia')
+    if subtitle:
+        _txt(sl, IN(0.4), IN(0.75), IN(9.2), IN(0.35),
+             _clip(subtitle, 130), 11, CREAM, fname='Calibri')
+
+def _footer(sl, t, cn, wu):
+    """Footer bar — company | website."""
+    _rect(sl, IN(0), IN(5.28), IN(10), IN(0.35), FTBG)
+    _txt(sl, IN(0.3), IN(5.29), IN(9.4), IN(0.30),
+         f'{cn}  |  {wu}', 8.5, SBLU, fname='Calibri')
+
+def _divider(sl, x, y, w):
+    _rect(sl, IN(x), IN(y), IN(w), IN(0.01), LGREY)
+
+def _accent_bar(sl, t, x, y, h, color=None):
+    """Thin left accent bar for content panels."""
+    _rect(sl, IN(x), IN(y), IN(0.07), IN(h), color or t.primary)
+
+def _section_head(sl, t, x, y, w, text, fs=14):
+    _txt(sl, IN(x), IN(y), IN(w), IN(0.40), text,
+         fs, t.primary, bold=True, fname='Georgia')
+
+def _lv_row(sl, t, x, y, label, value, lw=1.6, vw=2.6):
+    """Label : Value row."""
+    _txt(sl, IN(x),         IN(y), IN(lw),  IN(0.27), label, 9.5, t.primary, bold=True, fname='Calibri')
+    vfs = _adaptive_fs(str(value), 9.5, ideal_chars=35)
+    _txt(sl, IN(x+lw+0.05), IN(y), IN(vw),  IN(0.27), _clip(str(value), 80), vfs, DARK, fname='Calibri')
+    _divider(sl, x, y+0.30, lw+vw)
 
 
 # ══════════════════════════════════════════════════════════════
-# STYLE A — PROFESSIONAL
-# White background · Left accent bar · Stat cards row at bottom
+# SLIDE 1 — TITLE
+# Dark navy · Big company name · Stats bar at bottom
 # ══════════════════════════════════════════════════════════════
 
-def _A_chrome(sl, t, cn, n, total, wu):
-    _txt(sl, IN(.35), IN(.11), IN(6), IN(.22), cn.upper(), 7.5, t.chrome, bold=True)
-    _txt(sl, IN(8.8), IN(.11), IN(1.1), IN(.22), f'{n}/{total}', 8, t.chrome, align=PP_ALIGN.RIGHT)
-    _txt(sl, IN(.35), IN(5.38), IN(9.3), IN(.22), f'{wu}  |  {cn}', 7.5, t.chrome, align=PP_ALIGN.CENTER)
+def _R_title(prs, layout, t, sd, data):
+    sl = prs.slides.add_slide(layout)
+    cn      = data.get('company_name', '')
+    wu      = data.get('website', '')
+    tagline = data.get('tagline', '') or ''
+    contact = data.get('contact', {})
+    stats   = sd.get('stats') or {}
 
-def _A_stat_row(sl, t, stats, y):
-    if not stats: return
-    items = [(str(k),str(v)) for k,v in stats.items()][:5]
-    n=len(items); gap=.14; cw=(9.3-gap*(n-1))/n; ch=.82
-    for i,(lbl,val) in enumerate(items):
-        x=.35+i*(cw+gap)
-        vfs=_adaptive_fs(val, 18, ideal_chars=7)
-        _rrect(sl, IN(x), IN(y), IN(cw), IN(ch), t.card_bg, t.accent)
-        _txt(sl, IN(x+.05), IN(y+.05), IN(cw-.1), IN(ch*.58), val, vfs, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia', wrap=True)
-        _txt(sl, IN(x+.05), IN(y+ch*.52), IN(cw-.1), IN(ch*.42), lbl, 8.5, WHITE, align=PP_ALIGN.CENTER, wrap=True)
-
-def _A_content(prs, layout, t, sd, cn, wu, n, total):
-    sl = prs.slides.add_slide(layout); _bg(sl, WHITE); _A_chrome(sl, t, cn, n, total, wu)
-    title=sd.get('title',''); desc=sd.get('description','')
-    pts=sd.get('key_points',[]); stats=sd.get('stats')
-    _txt(sl, IN(.35), IN(.36), IN(9.3), IN(.72), title, 31, t.primary, bold=True, fname='Georgia', wrap=True)
-    has_desc=bool(desc)
-    if has_desc: _txt(sl, IN(.35), IN(1.1), IN(9.3), IN(.44), desc, 11.5, GREY, italic=True, wrap=True)
-    cy=1.60 if has_desc else 1.25
-    hs=bool(stats and isinstance(stats,dict) and stats)
-    ch=2.28 if hs else 2.88
-    bg=_rrect(sl, IN(.35), IN(cy), IN(9.3), IN(ch), t.light)
-    bg.line.color.rgb=LGREY; bg.line.width=Pt(.5)
-    _rect(sl, IN(.35), IN(cy), IN(.06), IN(ch), t.primary)
-    if pts: _bullets(sl, IN(.55), IN(cy+.12), IN(9.0), IN(ch-.24), pts)
-    if hs: _A_stat_row(sl, t, stats, cy+ch+.18)
-
-def _A_twocol(prs, layout, t, sd, cn, wu, n, total):
-    sl = prs.slides.add_slide(layout); _bg(sl, WHITE); _A_chrome(sl, t, cn, n, total, wu)
-    title=sd.get('title',''); desc=sd.get('description','')
-    pts=sd.get('key_points',[]); stats=sd.get('stats')
-    _txt(sl, IN(.35), IN(.36), IN(9.3), IN(.72), title, 31, t.primary, bold=True, fname='Georgia', wrap=True)
-    has_desc=bool(desc)
-    if has_desc: _txt(sl, IN(.35), IN(1.1), IN(9.3), IN(.44), desc, 11.5, GREY, italic=True, wrap=True)
-    cy=1.60 if has_desc else 1.25
-    hs=bool(stats and isinstance(stats,dict) and stats)
-    ch=2.28 if hs else 2.88; cw=4.5; gap=.30; mid=max(1,len(pts)//2)
-    lb=_rrect(sl, IN(.35), IN(cy), IN(cw), IN(ch), t.light); lb.line.color.rgb=LGREY; lb.line.width=Pt(.5)
-    _rect(sl, IN(.35), IN(cy), IN(.06), IN(ch), t.primary)
-    if pts[:mid]: _bullets(sl, IN(.55), IN(cy+.12), IN(cw-.26), IN(ch-.24), pts[:mid], fs=12.5)
-    rb=_rrect(sl, IN(.35+cw+gap), IN(cy), IN(cw), IN(ch), t.light); rb.line.color.rgb=LGREY; rb.line.width=Pt(.5)
-    _rect(sl, IN(.35+cw+gap), IN(cy), IN(.06), IN(ch), t.accent)
-    if pts[mid:]: _bullets(sl, IN(.55+cw+gap), IN(cy+.12), IN(cw-.26), IN(ch-.24), pts[mid:], fs=12.5)
-    if hs: _A_stat_row(sl, t, stats, cy+ch+.18)
-
-def _A_timeline(prs, layout, t, sd, cn, wu, n, total):
-    sl = prs.slides.add_slide(layout); _bg(sl, WHITE); _A_chrome(sl, t, cn, n, total, wu)
-    title=sd.get('title',''); desc=sd.get('description',''); pts=sd.get('key_points',[])
-    _txt(sl, IN(.35), IN(.36), IN(9.3), IN(.72), title, 27, t.primary, bold=True, fname='Georgia', wrap=True)
-    has_desc=bool(desc)
-    if has_desc: _txt(sl, IN(.35), IN(1.1), IN(9.3), IN(.44), desc, 11.5, GREY, italic=True, wrap=True)
-    sy=1.60 if has_desc else 1.30
-    if not pts: return
-    ih=3.55/len(pts)
-    for i,b in enumerate(pts):
-        y=sy+i*ih
-        yr,ct = (b.split(':',1)[0].strip()[:12], b.split(':',1)[1].strip()) if ':' in b else (str(1940+i*10), b)
-        badge=t.primary if i%2==0 else t.dark_bg
-        _rrect(sl, IN(.35), IN(y+.04), IN(1.15), IN(ih-.12), badge, t.accent)
-        _txt(sl, IN(.35), IN(y+.04), IN(1.15), IN(ih-.12), yr, 12, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
-        cb=_rrect(sl, IN(1.6), IN(y+.04), IN(8.05), IN(ih-.12), t.light); cb.line.color.rgb=LGREY; cb.line.width=Pt(.5)
-        _txt(sl, IN(1.78), IN(y+.04), IN(7.7), IN(ih-.12), ct, 12, DARK, wrap=True)
-
-def _A_cards(prs, layout, t, sd, cn, wu, n, total):
-    sl = prs.slides.add_slide(layout); _bg(sl, WHITE); _A_chrome(sl, t, cn, n, total, wu)
-    title=sd.get('title',''); desc=sd.get('description',''); pts=sd.get('key_points',[])
-    _txt(sl, IN(.35), IN(.36), IN(9.3), IN(.72), title, 31, t.primary, bold=True, fname='Georgia', wrap=True)
-    has_desc=bool(desc)
-    if has_desc: _txt(sl, IN(.35), IN(1.1), IN(9.3), IN(.44), desc[:180], 11, GREY, italic=True, wrap=True)
-    sy=1.60 if has_desc else 1.30
-    feats=[_smart_card_split(b) for b in pts]
-    cols=3; rows=(len(feats)+cols-1)//cols
-    cw=(9.3-.2*(cols-1))/cols; ch=(3.6-.18*(rows-1))/max(rows,1)
-    for i,(hdr,bdy) in enumerate(feats[:cols*rows]):
-        r=i//cols; c=i%cols; x=.35+c*(cw+.2); y=sy+r*(ch+.18)
-        bdy_display = _truncate(bdy, 160)
-        card=_rrect(sl, IN(x), IN(y), IN(cw), IN(ch), t.light); card.line.color.rgb=LGREY; card.line.width=Pt(.5)
-        _rect(sl, IN(x), IN(y), IN(cw), IN(.06), t.accent)
-        hdr_fs = _card_fs(hdr, 11.0, ideal_chars=40)
-        bdy_fs = _card_fs(bdy_display, 10.0, ideal_chars=90)
-        _txt(sl, IN(x+.12), IN(y+.10), IN(cw-.24), IN(.38), hdr, hdr_fs, t.primary, bold=True, wrap=True)
-        _txt(sl, IN(x+.12), IN(y+.48), IN(cw-.24), IN(ch-.60), bdy_display, bdy_fs, DARK, wrap=True)
-
-def _A_title(prs, layout, t, sd, data):
-    sl=prs.slides.add_slide(layout); cn=data.get('company_name',''); wu=data.get('website','')
-    _bg(sl, t.dark_bg)
-    from lxml import etree
-    from pptx.oxml.ns import qn
-    for ox,oy,r in [(0,0,1.2),(9.5,5,2.5),(8,-.5,3),(.5,4.5,1.8)]:
-        ov=sl.shapes.add_shape(MSO_SHAPE.OVAL, IN(ox-r), IN(oy-r), IN(r*2), IN(r*2))
-        ov.fill.solid(); ov.fill.fore_color.rgb=t.accent; ov.line.fill.background()
-        sf=ov._element.spPr.find(qn('a:solidFill'))
-        if sf is not None:
-            srgb=sf.find(qn('a:srgbClr'))
-            if srgb is not None:
-                a=etree.SubElement(srgb,qn('a:alpha')); a.set('val','7000')
-    _txt(sl, IN(.5), IN(.4), IN(9), IN(.32), cn.upper(), 9, t.accent, bold=True, align=PP_ALIGN.CENTER)
-    _txt(sl, IN(.5), IN(.78), IN(9), IN(1.4), cn, 44, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia', wrap=True)
-    # Title slide: always use short tagline — never the long description
-    tag = data.get('tagline', '') or ''
-    tag = tag[:160]  # hard cap to prevent overflow
-    if tag: _txt(sl, IN(.8), IN(2.26), IN(8.4), IN(.55), tag, 15, WHITE, italic=True, align=PP_ALIGN.CENTER, wrap=True)
-    _txt(sl, IN(2.5), IN(2.86), IN(5), IN(.26), '\u00b7  '*11, 13, t.accent, align=PP_ALIGN.CENTER)
-    stats=sd.get('stats')
-    if stats and isinstance(stats,dict):
-        items=list(stats.items())[:4]; nc=len(items); gap=.15
-        cw=(9.3-gap*(nc-1))/nc; ch=1.10; cy=3.22
-        for i,(lbl,val) in enumerate(items):
-            x=.35+i*(cw+gap)
-            vfs=_adaptive_fs(str(val), 26, ideal_chars=8)
-            _rrect(sl, IN(x), IN(cy), IN(cw), IN(ch), t.card_bg, t.accent)
-            _txt(sl, IN(x+.05), IN(cy+.06), IN(cw-.1), IN(ch*.58), str(val), vfs, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia', wrap=True)
-            _txt(sl, IN(x+.05), IN(cy+ch*.52), IN(cw-.1), IN(ch*.42), lbl, 9.5, WHITE, align=PP_ALIGN.CENTER, wrap=True)
-    _txt(sl, IN(.5), IN(5.28), IN(9), IN(.28), wu, 11, t.accent, italic=True, align=PP_ALIGN.CENTER)
-
-def _A_closing(prs, layout, t, sd, data):
-    sl=prs.slides.add_slide(layout); cn=data.get('company_name',''); wu=data.get('website',''); contact=data.get('contact',{})
     _bg(sl, t.primary)
-    _txt(sl, IN(.5), IN(.45), IN(9), IN(1.0), 'Thank You', 52, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
-    desc=sd.get('description','Thank you for your time.')
-    _txt(sl, IN(.8), IN(1.55), IN(8.4), IN(.5), desc, 14, WHITE, italic=True, align=PP_ALIGN.CENTER, wrap=True)
-    for i,(lbl,val) in enumerate([('\U0001f310 Website',wu),('\U0001f4cd Address',contact.get('address','India')),('\U0001f4de Phone',contact.get('phone','Contact via website')),('\U0001f4e7 Email',contact.get('email','Contact via website'))]):
-        x=.5 if i<2 else 5.3; y=2.18+(i%2)*.72
-        _rrect(sl, IN(x), IN(y), IN(4.2), IN(.62), t.dark_bg, t.accent)
-        _txt(sl, IN(x+.15), IN(y), IN(4.0), IN(.28), lbl, 9.5, t.accent, bold=True)
-        _txt(sl, IN(x+.15), IN(y+.28), IN(4.0), IN(.3), str(val), 11, WHITE)
-    _txt(sl, IN(.5), IN(4.0), IN(9), IN(.35), cn, 12, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
-    _txt(sl, IN(.5), IN(5.28), IN(9), IN(.28), wu, 11, t.accent, italic=True, align=PP_ALIGN.CENTER)
+    _rect(sl, IN(0), IN(0),    IN(10), IN(0.12), t.darker)
+    _rect(sl, IN(0), IN(5.50), IN(10), IN(0.12), t.darker)
 
-
-# ══════════════════════════════════════════════════════════════
-# STYLE B — BOLD SPLIT PANEL
-# Left 3.2" solid color panel with white title
-# Right white area with content
-# ══════════════════════════════════════════════════════════════
-
-PW = 3.2   # panel width inches
-CX = 3.35  # content start x
-CW = 6.4   # content width
-
-def _B_content(prs, layout, t, sd, cn, wu, n, total):
-    sl=prs.slides.add_slide(layout); _bg(sl, WHITE)
-    title=sd.get('title',''); desc=sd.get('description','')
-    pts=sd.get('key_points',[]); stats=sd.get('stats')
-
-    # Left panel
-    _rect(sl, IN(0), IN(0), IN(PW), IN(5.625), t.primary)
-    _txt(sl, IN(.15), IN(.1), IN(PW-.2), IN(.22), f'{n}/{total}', 8, t.light, align=PP_ALIGN.RIGHT)
-    _txt(sl, IN(.15), IN(.35), IN(PW-.2), IN(.22), cn.upper(), 7.5, t.light, bold=True)
-    # Slide title in panel
-    _txt(sl, IN(.15), IN(1.0), IN(PW-.25), IN(2.0), title, 22, WHITE, bold=True, fname='Georgia', wrap=True)
-    # Accent line under title
-    _rect(sl, IN(.15), IN(3.1), IN(PW-.3), IN(.04), t.accent)
-    # Stats in panel
-    has_stats=bool(stats and isinstance(stats,dict) and stats)
-    if has_stats:
-        items=list(stats.items())[:3]
-        for i,(lbl,val) in enumerate(items):
-            y=3.3+i*.72
-            _txt(sl, IN(.15), IN(y), IN(PW-.2), IN(.38), str(val), 20, t.accent, bold=True, fname='Georgia')
-            _txt(sl, IN(.15), IN(y+.36), IN(PW-.2), IN(.28), lbl, 8, t.light)
-    _txt(sl, IN(.1), IN(5.35), IN(PW-.1), IN(.2), wu, 7, t.light, italic=True)
-
-    # Right side
-    content_y = .25
-    if desc:
-        _txt(sl, IN(CX), IN(content_y), IN(CW), IN(.55), desc, 11, GREY, italic=True, wrap=True)
-        content_y += .6
-
-    bullet_h = 5.0 - content_y - .35
-    if pts: _bullets(sl, IN(CX), IN(content_y), IN(CW), IN(bullet_h), pts, fs=12.5)
-    _txt(sl, IN(CX), IN(5.38), IN(CW), IN(.2), cn, 7.5, t.chrome)
-
-def _B_twocol(prs, layout, t, sd, cn, wu, n, total):
-    sl=prs.slides.add_slide(layout); _bg(sl, WHITE)
-    title=sd.get('title',''); desc=sd.get('description','')
-    pts=sd.get('key_points',[]); stats=sd.get('stats')
-
-    # Left panel
-    _rect(sl, IN(0), IN(0), IN(PW), IN(5.625), t.primary)
-    _txt(sl, IN(.15), IN(.1), IN(PW-.2), IN(.22), f'{n}/{total}', 8, t.light, align=PP_ALIGN.RIGHT)
-    _txt(sl, IN(.15), IN(.35), IN(PW-.2), IN(.22), cn.upper(), 7.5, t.light, bold=True)
-    _txt(sl, IN(.15), IN(1.0), IN(PW-.25), IN(2.0), title, 22, WHITE, bold=True, fname='Georgia', wrap=True)
-    _rect(sl, IN(.15), IN(3.1), IN(PW-.3), IN(.04), t.accent)
-    if desc: _txt(sl, IN(.15), IN(3.22), IN(PW-.25), IN(1.5), desc, 9.5, t.light, italic=True, wrap=True)
-    _txt(sl, IN(.1), IN(5.35), IN(PW-.1), IN(.2), wu, 7, t.light, italic=True)
-
-    # Right side — two columns of bullets
-    mid = max(1, len(pts) // 2)
-    col_w = (CW - .2) / 2
-    content_y = .2
-
-    lc = _rrect(sl, IN(CX), IN(content_y), IN(col_w), IN(5.2), t.light)
-    lc.line.color.rgb = LGREY; lc.line.width = Pt(.5)
-    _rect(sl, IN(CX), IN(content_y), IN(col_w), IN(.05), t.primary)
-    if pts[:mid]: _bullets(sl, IN(CX+.1), IN(content_y+.12), IN(col_w-.2), IN(5.0), pts[:mid], fs=12)
-
-    rx = CX + col_w + .2
-    rc = _rrect(sl, IN(rx), IN(content_y), IN(col_w), IN(5.2), t.light)
-    rc.line.color.rgb = LGREY; rc.line.width = Pt(.5)
-    _rect(sl, IN(rx), IN(content_y), IN(col_w), IN(.05), t.accent)
-    if pts[mid:]: _bullets(sl, IN(rx+.1), IN(content_y+.12), IN(col_w-.2), IN(5.0), pts[mid:], fs=12)
-
-def _B_timeline(prs, layout, t, sd, cn, wu, n, total):
-    sl=prs.slides.add_slide(layout); _bg(sl, WHITE)
-    title=sd.get('title',''); desc=sd.get('description',''); pts=sd.get('key_points',[])
-    _rect(sl, IN(0), IN(0), IN(PW), IN(5.625), t.primary)
-    _txt(sl, IN(.15), IN(.1), IN(PW-.2), IN(.22), f'{n}/{total}', 8, t.light, align=PP_ALIGN.RIGHT)
-    _txt(sl, IN(.15), IN(.35), IN(PW-.2), IN(.22), cn.upper(), 7.5, t.light, bold=True)
-    _txt(sl, IN(.15), IN(.8), IN(PW-.25), IN(2.0), title, 22, WHITE, bold=True, fname='Georgia', wrap=True)
-    if desc: _txt(sl, IN(.15), IN(2.9), IN(PW-.25), IN(1.0), desc, 9.5, t.light, italic=True, wrap=True)
-    _txt(sl, IN(.1), IN(5.35), IN(PW-.1), IN(.2), wu, 7, t.light, italic=True)
-    if not pts: return
-    ih=5.3/len(pts); sy=.15
-    for i,b in enumerate(pts):
-        y=sy+i*ih
-        yr,ct=(b.split(':',1)[0].strip()[:10], b.split(':',1)[1].strip()) if ':' in b else (str(1940+i*10), b)
-        # Year pill
-        pill=_rrect(sl, IN(CX), IN(y+.04), IN(1.0), IN(ih-.1), t.dark_bg, t.accent, lw=Pt(1.2))
-        _txt(sl, IN(CX), IN(y+.04), IN(1.0), IN(ih-.1), yr, 11, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
-        # Content
-        cb=_rrect(sl, IN(CX+1.1), IN(y+.04), IN(5.2), IN(ih-.1), t.light); cb.line.color.rgb=LGREY; cb.line.width=Pt(.5)
-        _txt(sl, IN(CX+1.2), IN(y+.04), IN(5.0), IN(ih-.1), ct, 11.5, DARK, wrap=True)
-
-def _B_cards(prs, layout, t, sd, cn, wu, n, total):
-    sl=prs.slides.add_slide(layout); _bg(sl, WHITE)
-    title=sd.get('title',''); desc=sd.get('description',''); pts=sd.get('key_points',[])
-    _rect(sl, IN(0), IN(0), IN(PW), IN(5.625), t.primary)
-    _txt(sl, IN(.15), IN(.1), IN(PW-.2), IN(.22), f'{n}/{total}', 8, t.light, align=PP_ALIGN.RIGHT)
-    _txt(sl, IN(.15), IN(.35), IN(PW-.2), IN(.22), cn.upper(), 7.5, t.light, bold=True)
-    _txt(sl, IN(.15), IN(.8), IN(PW-.25), IN(2.0), title, 22, WHITE, bold=True, fname='Georgia', wrap=True)
-    if desc: _txt(sl, IN(.15), IN(2.9), IN(PW-.25), IN(1.5), desc[:180], 9.5, t.light, italic=True, wrap=True)
-    _txt(sl, IN(.1), IN(5.35), IN(PW-.1), IN(.2), wu, 7, t.light, italic=True)
-    feats=[_smart_card_split(b) for b in pts]
-    cols=2; rows=(len(feats)+cols-1)//cols
-    cw=(CW-.15*(cols-1))/cols; ch=(5.4-.18*(rows-1))/max(rows,1)
-    for i,(hdr,bdy) in enumerate(feats[:cols*rows]):
-        r=i//cols; c=i%cols; x=CX+c*(cw+.15); y=.15+r*(ch+.18)
-        bdy_display = _truncate(bdy, 160)
-        card=_rrect(sl, IN(x), IN(y), IN(cw), IN(ch), t.light); card.line.color.rgb=LGREY; card.line.width=Pt(.5)
-        _rect(sl, IN(x), IN(y), IN(cw), IN(.06), t.accent)
-        hdr_fs = _card_fs(hdr, 10.5, ideal_chars=40)
-        bdy_fs = _card_fs(bdy_display, 9.5, ideal_chars=90)
-        _txt(sl, IN(x+.1), IN(y+.1), IN(cw-.2), IN(.38), hdr, hdr_fs, t.primary, bold=True, wrap=True)
-        _txt(sl, IN(x+.1), IN(y+.48), IN(cw-.2), IN(ch-.60), bdy_display, bdy_fs, DARK, wrap=True)
-
-def _B_title(prs, layout, t, sd, data):
-    sl=prs.slides.add_slide(layout); cn=data.get('company_name',''); wu=data.get('website','')
-    _bg(sl, WHITE)
-    # Left half solid
-    _rect(sl, IN(0), IN(0), IN(5.2), IN(5.625), t.primary)
-    _rect(sl, IN(0), IN(4.5), IN(5.2), IN(.6), t.dark_bg)
-    _rect(sl, IN(5.2), IN(0), IN(.08), IN(5.625), t.accent)
-    # Company name in left panel — founding year extracted dynamically
-    stats_raw = sd.get('stats')
-    found_yr = _founding_year(stats_raw if isinstance(stats_raw, dict) else {})
+    # Est. badge
+    found_yr = _founding_year(stats if isinstance(stats, dict) else {})
     if found_yr:
-        _txt(sl, IN(.3), IN(.4), IN(4.6), IN(.3), f'EST. {found_yr}', 9, t.light, bold=True, fname='Calibri')
-    _txt(sl, IN(.3), IN(.8 if found_yr else .55), IN(4.6), IN(2.2), cn, 38, t.accent, bold=True, fname='Georgia', wrap=True)
-    # Title slide: always use short tagline only
-    tag = data.get('tagline', '') or ''
-    tag = tag[:160]
-    if tag: _txt(sl, IN(.3), IN(3.15), IN(4.6), IN(.9), tag, 13, WHITE, italic=True, wrap=True)
-    _txt(sl, IN(.3), IN(4.55), IN(4.6), IN(.3), wu, 10, t.light, italic=True)
-    # Right side — tagline at top
-    tagline = data.get('tagline','')
-    if tagline: _txt(sl, IN(5.5), IN(.28), IN(4.1), IN(.45), tagline, 12, GREY, italic=True, wrap=True)
-    # Stats — 2×2 grid so each card is ~2" wide (avoids text overflow)
-    if stats_raw and isinstance(stats_raw, dict):
-        items=list(stats_raw.items())[:4]; ncols=2
-        cw=(4.1-.12)/ncols; ch=.88; gap=.12; sy=.82
-        for i,(lbl,val) in enumerate(items):
-            r=i//ncols; c=i%ncols
-            x=5.5+c*(cw+gap); y=sy+r*(ch+.1)
-            vfs=_adaptive_fs(str(val), 20, ideal_chars=7)
-            _rrect(sl, IN(x), IN(y), IN(cw), IN(ch), t.light)
-            _txt(sl, IN(x+.06), IN(y+.06), IN(cw-.12), IN(ch*.55), str(val), vfs, t.primary, bold=True, align=PP_ALIGN.CENTER, fname='Georgia', wrap=True)
-            _txt(sl, IN(x+.06), IN(y+ch*.54), IN(cw-.12), IN(ch*.42), lbl, 8.5, GREY, align=PP_ALIGN.CENTER, wrap=True)
-    # Bullet points below stats
-    pts=sd.get('key_points',[])
-    bullet_y = .82 + 2*(0.88+.1) + .12   # below the 2-row grid
-    if pts: _bullets(sl, IN(5.5), IN(bullet_y), IN(4.1), IN(5.35-bullet_y), pts[:4], fs=10.5, color=DARK)
+        _rrect(sl, IN(0.5), IN(0.35), IN(1.5), IN(0.38), t.card_hdr)
+        _txt(sl, IN(0.5), IN(0.35), IN(1.5), IN(0.38),
+             f'Est. {found_yr}', 11, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Calibri')
 
-def _B_closing(prs, layout, t, sd, data):
-    sl=prs.slides.add_slide(layout); cn=data.get('company_name',''); wu=data.get('website',''); contact=data.get('contact',{})
-    _bg(sl, WHITE)
-    _rect(sl, IN(0), IN(0), IN(5.2), IN(5.625), t.primary)
-    _rect(sl, IN(0), IN(3.8), IN(5.2), IN(1.0), t.dark_bg)
-    _rect(sl, IN(5.2), IN(0), IN(.08), IN(5.625), t.accent)
-    _txt(sl, IN(.3), IN(.5), IN(4.6), IN(1.2), 'Thank\nYou', 46, t.accent, bold=True, fname='Georgia')
-    desc=sd.get('description','Thank you for your time.')
-    _txt(sl, IN(.3), IN(1.9), IN(4.6), IN(1.2), desc, 12, WHITE, italic=True, wrap=True)
-    _txt(sl, IN(.3), IN(3.88), IN(4.6), IN(.3), cn, 11, t.light, bold=True, fname='Georgia')
-    _txt(sl, IN(.3), IN(4.25), IN(4.6), IN(.25), wu, 10, t.light, italic=True)
-    for i,(lbl,val) in enumerate([('\U0001f310',wu),('\U0001f4cd',contact.get('address','India')),('\U0001f4de',contact.get('phone','—')),('\U0001f4e7',contact.get('email','—'))]):
-        y=.4+i*1.15
-        _txt(sl, IN(5.5), IN(y), IN(.4), IN(.4), lbl, 18, t.primary)
-        _txt(sl, IN(5.95), IN(y), IN(3.7), IN(.3), lbl.split()[-1] if len(lbl.split())>1 else '', 9, GREY, bold=True)
-        _txt(sl, IN(5.95), IN(y+.28), IN(3.7), IN(.35), str(val), 12, DARK, wrap=True)
-        _rect(sl, IN(5.5), IN(y+.72), IN(4.2), IN(.02), LGREY)
+    # Company name
+    _txt(sl, IN(0.5), IN(1.05), IN(9.0), IN(1.1),
+         cn, 46, WHITE, bold=True, align=PP_ALIGN.CENTER, fname='Georgia', wrap=True)
+
+    # Tagline (short only — no long description)
+    tag = _clip(tagline, 130)
+    if tag:
+        _txt(sl, IN(0.5), IN(2.25), IN(8.5), IN(0.50), tag, 18, CREAM,
+             align=PP_ALIGN.CENTER, fname='Calibri')
+
+    # Industry / short desc
+    desc = _clip(sd.get('description', ''), 110)
+    if desc:
+        _txt(sl, IN(0.5), IN(2.85), IN(8.5), IN(0.40), desc, 13, SBLU,
+             italic=True, align=PP_ALIGN.CENTER, fname='Calibri')
+
+    # Contact line
+    parts = []
+    addr  = contact.get('address', '')
+    phone = contact.get('phone', '')
+    email = contact.get('email', '')
+    if addr:  parts.append(f'📍 {_clip(addr, 35)}')
+    if wu:    parts.append(f'🌐 {wu}')
+    if phone: parts.append(f'📞 {phone}')
+    if email: parts.append(f'✉ {_clip(email, 35)}')
+    if parts:
+        _txt(sl, IN(0.5), IN(3.42), IN(9.0), IN(0.38),
+             '   |   '.join(parts[:4]), 11, SBLU, align=PP_ALIGN.CENTER, fname='Calibri')
+
+    # Stats bar
+    if stats and isinstance(stats, dict):
+        items = list(stats.items())[:5]
+        _rect(sl, IN(0), IN(4.10), IN(10), IN(1.40), t.darker)
+        _rect(sl, IN(0), IN(4.10), IN(10), IN(0.06), t.accent)
+        ns   = len(items)
+        col  = 9.4 / ns
+        for i, (lbl, val) in enumerate(items):
+            x = 0.3 + i * col
+            vfs = _adaptive_fs(str(val), 30, ideal_chars=6)
+            _txt(sl, IN(x), IN(4.20), IN(col-0.1), IN(0.65),
+                 str(val), vfs, t.accent, bold=True, fname='Georgia')
+            _txt(sl, IN(x), IN(4.88), IN(col-0.1), IN(0.35),
+                 lbl, 9.5, SBLU, fname='Calibri')
 
 
 # ══════════════════════════════════════════════════════════════
-# STYLE C — CLEAN CARDS
-# Very light background · White floating cards · Pill stats
+# LABEL:VALUE TWO-COLUMN
+# For: Industry, Overview, Profile, Classification slides
+# Header bar · Two panels with label:value rows
 # ══════════════════════════════════════════════════════════════
 
-def _C_chrome(sl, t, cn, n, total, wu):
-    _txt(sl, IN(.25), IN(.07), IN(6), IN(.2), cn.upper(), 7.5, t.chrome, bold=True)
-    _txt(sl, IN(8.8), IN(.07), IN(1.1), IN(.2), f'{n}/{total}', 7.5, t.chrome, align=PP_ALIGN.RIGHT)
-    _txt(sl, IN(.25), IN(5.38), IN(9.5), IN(.2), f'{wu}  |  {cn}', 7.5, t.chrome, align=PP_ALIGN.CENTER)
+def _R_lv_two_col(prs, layout, t, sd, cn, wu, n, total, bg=WHITE):
+    sl = prs.slides.add_slide(layout)
+    _bg(sl, bg)
+    title = sd.get('title', '')
+    desc  = sd.get('description', '')
+    pts   = sd.get('key_points', [])
+    stats = sd.get('stats')
 
-def _C_content(prs, layout, t, sd, cn, wu, n, total):
-    sl=prs.slides.add_slide(layout); _bg(sl, t.bg_warm); _C_chrome(sl, t, cn, n, total, wu)
-    title=sd.get('title',''); desc=sd.get('description','')
-    pts=sd.get('key_points',[]); stats=sd.get('stats')
+    _header(sl, t, title, desc)
+    _footer(sl, t, cn, wu)
 
-    # Title card
-    tc=_rrect(sl, IN(.22), IN(.3), IN(9.56), IN(.9), WHITE); tc.line.color.rgb=LGREY; tc.line.width=Pt(.5)
-    _rect(sl, IN(.22), IN(.3), IN(.1), IN(.9), t.primary)
-    _txt(sl, IN(.45), IN(.34), IN(9.0), IN(.5), title, 26, t.primary, bold=True, fname='Georgia', wrap=True)
-    if desc: _txt(sl, IN(.45), IN(.75), IN(9.0), IN(.4), desc, 10.5, GREY, italic=True, wrap=True)
+    CY = 1.35; CH = 3.70
+    LW = 4.55; RX = 5.08; RW = 4.55
 
-    has_stats=bool(stats and isinstance(stats,dict) and stats)
-    content_end=4.55 if has_stats else 5.1
+    mid = max(1, len(pts) // 2)
+    left_pts  = pts[:mid]
+    right_pts = pts[mid:]
 
-    # Content card
-    cc=_rrect(sl, IN(.22), IN(1.28), IN(9.56), IN(content_end-1.28), WHITE); cc.line.color.rgb=LGREY; cc.line.width=Pt(.5)
-    _rect(sl, IN(.22), IN(1.28), IN(9.56), IN(.06), t.accent)
-    if pts:
-        if len(pts)>5:
-            mid=len(pts)//2
-            _bullets(sl, IN(.35), IN(1.38), IN(4.55), IN(content_end-1.45), pts[:mid], fs=12)
-            _bullets(sl, IN(5.0), IN(1.38), IN(4.55), IN(content_end-1.45), pts[mid:], fs=12)
-        else:
-            _bullets(sl, IN(.35), IN(1.38), IN(9.3), IN(content_end-1.45), pts, fs=12.5)
+    # Left panel
+    _rect(sl, IN(0.28), IN(CY), IN(LW), IN(CH), t.soft if bg == WHITE else WHITE,
+          LGREY, Pt(0.5))
+    _accent_bar(sl, t, 0.28, CY, CH, t.primary)
 
-    # Stat pills
+    y = CY + 0.15
+    for pt in left_pts[:10]:
+        if y > CY + CH - 0.25: break
+        lbl, val = _smart_split(pt)
+        _lv_row(sl, t, 0.48, y, lbl, val, lw=1.55, vw=LW-1.75)
+        y += 0.34
+
+    # Right panel
+    _rect(sl, IN(RX), IN(CY), IN(RW), IN(CH), t.soft if bg == WHITE else WHITE,
+          LGREY, Pt(0.5))
+    _accent_bar(sl, t, RX, CY, CH, t.accent)
+
+    # Stats grid on right if available
+    if stats and isinstance(stats, dict) and not right_pts:
+        _section_head(sl, t, RX+0.2, CY+0.1, RW-0.3, 'Key Metrics', fs=13)
+        for i, (k, v) in enumerate(list(stats.items())[:8]):
+            ry = CY + 0.55 + i * 0.38
+            if ry > CY + CH - 0.25: break
+            _lv_row(sl, t, RX+0.2, ry, k, v, lw=1.55, vw=RW-1.75)
+    else:
+        y = CY + 0.15
+        for pt in right_pts[:10]:
+            if y > CY + CH - 0.25: break
+            lbl, val = _smart_split(pt)
+            _lv_row(sl, t, RX+0.2, y, lbl, val, lw=1.55, vw=RW-1.75)
+            y += 0.34
+
+
+# ══════════════════════════════════════════════════════════════
+# BULLET TWO-COLUMN
+# For general content slides with many points
+# Header bar · Two bullet columns
+# ══════════════════════════════════════════════════════════════
+
+def _R_two_col(prs, layout, t, sd, cn, wu, n, total, bg=WHITE):
+    sl = prs.slides.add_slide(layout)
+    _bg(sl, bg)
+    title = sd.get('title', '')
+    desc  = sd.get('description', '')
+    pts   = sd.get('key_points', [])
+    stats = sd.get('stats')
+
+    _header(sl, t, title, desc)
+    _footer(sl, t, cn, wu)
+
+    has_stats = bool(stats and isinstance(stats, dict) and stats)
+    CY = 1.35; CH = 3.70 if not has_stats else 3.20
+    LW = 4.55; RX = 5.08; RW = 4.55
+
+    mid  = max(1, len(pts) // 2)
+    lpts = pts[:mid]; rpts = pts[mid:]
+
+    # Left
+    _rect(sl, IN(0.28), IN(CY), IN(LW), IN(CH), t.soft if bg == WHITE else WHITE,
+          LGREY, Pt(0.5))
+    _accent_bar(sl, t, 0.28, CY, CH, t.primary)
+    if lpts:
+        _multi_txt(sl, IN(0.48), IN(CY+0.15), IN(LW-0.25), IN(CH-0.25),
+                   [_clip(p, 120) for p in lpts], 11, DARK)
+
+    # Right
+    _rect(sl, IN(RX), IN(CY), IN(RW), IN(CH), t.soft if bg == WHITE else WHITE,
+          LGREY, Pt(0.5))
+    _accent_bar(sl, t, RX, CY, CH, t.accent)
+    if rpts:
+        _multi_txt(sl, IN(RX+0.2), IN(CY+0.15), IN(RW-0.25), IN(CH-0.25),
+                   [_clip(p, 120) for p in rpts], 11, DARK)
+
+    # Stats pills at bottom
     if has_stats:
-        items=list(stats.items())[:5]; ns=len(items); gap=.1
-        pw=(9.56-gap*(ns-1))/ns; ph=.65
-        for i,(lbl,val) in enumerate(items):
-            px=.22+i*(pw+gap)
-            _rrect(sl, IN(px), IN(4.7), IN(pw), IN(ph), t.primary)
-            vfs=_adaptive_fs(str(val), 16, ideal_chars=7)
-            _txt(sl, IN(px+.04), IN(4.72), IN(pw-.08), IN(ph*.55), str(val), vfs, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia', wrap=True)
-            _txt(sl, IN(px+.04), IN(4.72+ph*.52), IN(pw-.08), IN(ph*.42), lbl, 7.5, WHITE, align=PP_ALIGN.CENTER, wrap=True)
+        items = list(stats.items())[:5]
+        ns = len(items); sw = 9.44 / ns
+        sy = CY + CH + 0.15
+        for i, (lbl, val) in enumerate(items):
+            sx = 0.28 + i * sw
+            _rrect(sl, IN(sx), IN(sy), IN(sw-0.05), IN(0.62), t.primary)
+            vfs = _adaptive_fs(str(val), 16, ideal_chars=6)
+            _txt(sl, IN(sx+0.05), IN(sy+0.04), IN(sw-0.15), IN(0.34),
+                 str(val), vfs, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
+            _txt(sl, IN(sx+0.05), IN(sy+0.38), IN(sw-0.15), IN(0.22),
+                 lbl, 7.5, WHITE, align=PP_ALIGN.CENTER, fname='Calibri')
 
-def _C_twocol(prs, layout, t, sd, cn, wu, n, total):
-    sl=prs.slides.add_slide(layout); _bg(sl, t.bg_warm); _C_chrome(sl, t, cn, n, total, wu)
-    title=sd.get('title',''); desc=sd.get('description',''); pts=sd.get('key_points',[]); stats=sd.get('stats')
-    tc=_rrect(sl, IN(.22), IN(.3), IN(9.56), IN(.9), WHITE); tc.line.color.rgb=LGREY; tc.line.width=Pt(.5)
-    _rect(sl, IN(.22), IN(.3), IN(.1), IN(.9), t.primary)
-    _txt(sl, IN(.45), IN(.34), IN(9.0), IN(.5), title, 26, t.primary, bold=True, fname='Georgia', wrap=True)
-    if desc: _txt(sl, IN(.45), IN(.75), IN(9.0), IN(.4), desc, 10.5, GREY, italic=True, wrap=True)
-    has_stats=bool(stats and isinstance(stats,dict) and stats)
-    content_end=4.55 if has_stats else 5.1; cw=4.65; mid=max(1,len(pts)//2)
-    lc=_rrect(sl, IN(.22), IN(1.28), IN(cw), IN(content_end-1.28), WHITE); lc.line.color.rgb=LGREY; lc.line.width=Pt(.5)
-    _rect(sl, IN(.22), IN(1.28), IN(cw), IN(.06), t.primary)
-    if pts[:mid]: _bullets(sl, IN(.35), IN(1.38), IN(cw-.2), IN(content_end-1.45), pts[:mid], fs=12)
-    rc=_rrect(sl, IN(.22+cw+.13), IN(1.28), IN(cw), IN(content_end-1.28), WHITE); rc.line.color.rgb=LGREY; rc.line.width=Pt(.5)
-    _rect(sl, IN(.22+cw+.13), IN(1.28), IN(cw), IN(.06), t.accent)
-    if pts[mid:]: _bullets(sl, IN(.35+cw+.13), IN(1.38), IN(cw-.2), IN(content_end-1.45), pts[mid:], fs=12)
+
+# ══════════════════════════════════════════════════════════════
+# 3-COLUMN CARD GRID
+# Header bar · 3×2 cards with dark navy header bars
+# For: Customers, Strengths, Products, Team, etc.
+# ══════════════════════════════════════════════════════════════
+
+def _R_cards(prs, layout, t, sd, cn, wu, n, total, bg=WHITE):
+    sl = prs.slides.add_slide(layout)
+    _bg(sl, bg)
+    title = sd.get('title', '')
+    desc  = sd.get('description', '')
+    pts   = sd.get('key_points', [])
+    stats = sd.get('stats')
+
+    _header(sl, t, title, desc)
+    _footer(sl, t, cn, wu)
+
+    has_stats = bool(stats and isinstance(stats, dict) and stats)
+    avail_h   = (4.65 if has_stats else 5.18) - 1.40  # content area
+
+    COLS   = 3
+    CARD_W = 3.00
+    GAP    = (9.44 - COLS * CARD_W) / (COLS - 1)   # ~0.22"
+    xs     = [0.28 + i * (CARD_W + GAP) for i in range(COLS)]
+
+    rows   = min((len(pts) + COLS - 1) // COLS, 2)
+    rows   = max(rows, 1)
+    CARD_H = min((avail_h - 0.18 * (rows - 1)) / rows, 1.85)
+
+    hdr_colors = [t.primary, t.dark_bg, t.card_hdr,
+                  t.dark_bg, t.primary, t.card_hdr]
+
+    for i, pt in enumerate(pts[:COLS * rows]):
+        row = i // COLS; col = i % COLS
+        x = xs[col]; y = 1.40 + row * (CARD_H + 0.18)
+
+        hdr, body = _smart_split(pt)
+        body_d    = _clip(body, 160)
+
+        # Card background
+        cb = _rrect(sl, IN(x), IN(y), IN(CARD_W), IN(CARD_H),
+                    LBLU if bg == WHITE else WHITE)
+        cb.line.color.rgb = LGREY; cb.line.width = Pt(0.5)
+
+        # Dark header bar
+        _rect(sl, IN(x), IN(y), IN(CARD_W), IN(0.42), hdr_colors[i])
+
+        # Card title (inside header bar)
+        hfs = _card_fs(hdr, 11.0, ideal_chars=40)
+        _txt(sl, IN(x+0.12), IN(y+0.07), IN(CARD_W-0.24), IN(0.32),
+             hdr, hfs, WHITE, bold=True, fname='Georgia', wrap=True)
+
+        # Card body
+        bfs = _card_fs(body_d, 9.5, ideal_chars=80)
+        _txt(sl, IN(x+0.12), IN(y+0.48), IN(CARD_W-0.24), IN(CARD_H-0.60),
+             body_d, bfs, DARK, fname='Calibri', wrap=True)
+
+    # Stats row
     if has_stats:
-        items=list(stats.items())[:5]; ns=len(items); gap=.1
-        pw=(9.56-gap*(ns-1))/ns; ph=.65
-        for i,(lbl,val) in enumerate(items):
-            px=.22+i*(pw+gap)
-            _rrect(sl, IN(px), IN(4.7), IN(pw), IN(ph), t.primary)
-            vfs=_adaptive_fs(str(val), 16, ideal_chars=7)
-            _txt(sl, IN(px+.04), IN(4.72), IN(pw-.08), IN(ph*.55), str(val), vfs, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia', wrap=True)
-            _txt(sl, IN(px+.04), IN(4.72+ph*.52), IN(pw-.08), IN(ph*.42), lbl, 7.5, WHITE, align=PP_ALIGN.CENTER, wrap=True)
+        items = list(stats.items())[:5]
+        _rect(sl, IN(0.28), IN(4.65), IN(9.44), IN(0.60), t.darker)
+        ns = len(items); sw = 9.44 / ns
+        for i, (lbl, val) in enumerate(items):
+            sx = 0.28 + i * sw
+            vfs = _adaptive_fs(str(val), 14, ideal_chars=6)
+            _txt(sl, IN(sx+0.05), IN(4.68), IN(sw-0.1), IN(0.30),
+                 str(val), vfs, t.accent, bold=True, fname='Georgia')
+            _txt(sl, IN(sx+0.05), IN(4.97), IN(sw-0.1), IN(0.22),
+                 lbl, 8.5, SBLU, fname='Calibri')
 
-def _C_timeline(prs, layout, t, sd, cn, wu, n, total):
-    sl=prs.slides.add_slide(layout); _bg(sl, t.bg_warm); _C_chrome(sl, t, cn, n, total, wu)
-    title=sd.get('title',''); desc=sd.get('description',''); pts=sd.get('key_points',[])
-    tc=_rrect(sl, IN(.22), IN(.3), IN(9.56), IN(.9), WHITE); tc.line.color.rgb=LGREY; tc.line.width=Pt(.5)
-    _rect(sl, IN(.22), IN(.3), IN(.1), IN(.9), t.primary)
-    _txt(sl, IN(.45), IN(.34), IN(9.0), IN(.5), title, 26, t.primary, bold=True, fname='Georgia', wrap=True)
-    if desc: _txt(sl, IN(.45), IN(.75), IN(9.0), IN(.4), desc, 10.5, GREY, italic=True, wrap=True)
+
+# ══════════════════════════════════════════════════════════════
+# TIMELINE
+# Header bar · Vertical line · Year badge · Content box
+# Exactly 4 entries per slide
+# ══════════════════════════════════════════════════════════════
+
+def _R_timeline(prs, layout, t, sd, cn, wu, n, total, bg=LBLU):
+    sl = prs.slides.add_slide(layout)
+    _bg(sl, bg)
+    title = sd.get('title', '')
+    desc  = sd.get('description', '')
+    pts   = sd.get('key_points', [])
+
+    _header(sl, t, title, desc)
+    _footer(sl, t, cn, wu)
+
     if not pts: return
-    ih=3.95/len(pts); sy=1.3
-    for i,b in enumerate(pts):
-        y=sy+i*ih
-        yr,ct=(b.split(':',1)[0].strip()[:12], b.split(':',1)[1].strip()) if ':' in b else (str(1940+i*10), b)
-        _rrect(sl, IN(.22), IN(y+.04), IN(1.1), IN(ih-.1), t.primary)
-        _txt(sl, IN(.22), IN(y+.04), IN(1.1), IN(ih-.1), yr, 11, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
-        cb=_rrect(sl, IN(1.42), IN(y+.04), IN(8.36), IN(ih-.1), WHITE); cb.line.color.rgb=LGREY; cb.line.width=Pt(.5)
-        _txt(sl, IN(1.56), IN(y+.04), IN(8.1), IN(ih-.1), ct, 11.5, DARK, wrap=True)
 
-def _C_feature_cards(prs, layout, t, sd, cn, wu, n, total):
-    sl=prs.slides.add_slide(layout); _bg(sl, t.bg_warm); _C_chrome(sl, t, cn, n, total, wu)
-    title=sd.get('title',''); desc=sd.get('description',''); pts=sd.get('key_points',[])
-    tc=_rrect(sl, IN(.22), IN(.3), IN(9.56), IN(.9), WHITE); tc.line.color.rgb=LGREY; tc.line.width=Pt(.5)
-    _rect(sl, IN(.22), IN(.3), IN(.1), IN(.9), t.primary)
-    _txt(sl, IN(.45), IN(.34), IN(9.0), IN(.5), title, 26, t.primary, bold=True, fname='Georgia', wrap=True)
-    if desc: _txt(sl, IN(.45), IN(.75), IN(9.0), IN(.4), desc[:180], 10.5, GREY, italic=True, wrap=True)
-    feats=[_smart_card_split(b) for b in pts]
-    cols=3; rows=(len(feats)+cols-1)//cols
-    cw=(9.56-.18*(cols-1))/cols; ch=(3.78-.18*(rows-1))/max(rows,1)
-    for i,(hdr,bdy) in enumerate(feats[:cols*rows]):
-        r=i//cols; c=i%cols; x=.22+c*(cw+.18); y=1.32+r*(ch+.18)
-        bdy_display = _truncate(bdy, 160)
-        card=_rrect(sl, IN(x), IN(y), IN(cw), IN(ch), WHITE); card.line.color.rgb=LGREY; card.line.width=Pt(.5)
-        _rect(sl, IN(x), IN(y), IN(cw), IN(.07), t.primary if i%3==0 else t.accent if i%3==1 else t.dark_bg)
-        hdr_fs = _card_fs(hdr, 11.0, ideal_chars=40)
-        bdy_fs = _card_fs(bdy_display, 10.0, ideal_chars=90)
-        _txt(sl, IN(x+.1), IN(y+.11), IN(cw-.2), IN(.38), hdr, hdr_fs, t.primary, bold=True, wrap=True)
-        _txt(sl, IN(x+.1), IN(y+.49), IN(cw-.2), IN(ch-.60), bdy_display, bdy_fs, DARK, wrap=True)
+    # Vertical line
+    _rect(sl, IN(1.60), IN(1.32), IN(0.08), IN(3.72), t.chrome)
 
-def _C_title(prs, layout, t, sd, data):
-    sl=prs.slides.add_slide(layout); cn=data.get('company_name',''); wu=data.get('website','')
-    _bg(sl, WHITE)
-    # Top color stripe
-    _rect(sl, IN(0), IN(0), IN(10), IN(.18), t.primary)
-    _rect(sl, IN(0), IN(.18), IN(10), IN(.06), t.accent)
-    # Company name big centered
-    _txt(sl, IN(.5), IN(.4), IN(9), IN(1.6), cn, 46, t.primary, bold=True, align=PP_ALIGN.CENTER, fname='Georgia', wrap=True)
-    # Accent underline
-    _rect(sl, IN(3.0), IN(2.1), IN(4.0), IN(.06), t.accent)
-    # Title slide: always use short tagline only
-    tag = data.get('tagline', '') or ''
-    tag = tag[:160]
-    if tag: _txt(sl, IN(.8), IN(2.25), IN(8.4), IN(.55), tag, 15, GREY, italic=True, align=PP_ALIGN.CENTER, wrap=True)
-    # Stats cards row
-    stats=sd.get('stats')
-    if stats and isinstance(stats,dict):
-        items=list(stats.items())[:4]; nc=len(items); gap=.2
-        cw=(9.5-gap*(nc-1))/nc; ch=1.25; cy=3.1
-        for i,(lbl,val) in enumerate(items):
-            x=.25+i*(cw+gap)
-            vfs=_adaptive_fs(str(val), 26, ideal_chars=8)
-            card=_rrect(sl, IN(x), IN(cy), IN(cw), IN(ch), t.light); card.line.color.rgb=t.chrome; card.line.width=Pt(.8)
-            _rect(sl, IN(x), IN(cy), IN(cw), IN(.07), t.primary)
-            _txt(sl, IN(x+.05), IN(cy+.1), IN(cw-.1), IN(ch*.55), str(val), vfs, t.primary, bold=True, align=PP_ALIGN.CENTER, fname='Georgia', wrap=True)
-            _txt(sl, IN(x+.05), IN(cy+ch*.56), IN(cw-.1), IN(ch*.38), lbl, 9.5, GREY, align=PP_ALIGN.CENTER, wrap=True)
-    _txt(sl, IN(.5), IN(4.6), IN(9), IN(.25), wu, 11, GREY, italic=True, align=PP_ALIGN.CENTER)
-    # Bottom stripe
-    _rect(sl, IN(0), IN(5.45), IN(10), IN(.18), t.primary)
+    n_items = min(len(pts), 4)
+    ih      = 3.72 / n_items
+    sy      = 1.32
 
-def _C_closing(prs, layout, t, sd, data):
-    sl=prs.slides.add_slide(layout); cn=data.get('company_name',''); wu=data.get('website',''); contact=data.get('contact',{})
-    _bg(sl, t.bg_warm)
-    _rect(sl, IN(0), IN(0), IN(10), IN(.18), t.primary)
-    _rect(sl, IN(0), IN(.18), IN(10), IN(.06), t.accent)
-    _txt(sl, IN(.5), IN(.4), IN(9), IN(1.1), 'Thank You', 52, t.primary, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
-    _rect(sl, IN(3.5), IN(1.55), IN(3.0), IN(.06), t.accent)
-    desc=sd.get('description','Thank you for your time.')
-    _txt(sl, IN(.8), IN(1.72), IN(8.4), IN(.5), desc, 14, GREY, italic=True, align=PP_ALIGN.CENTER, wrap=True)
-    cards=[('\U0001f310 Website',wu),('\U0001f4cd Address',contact.get('address','India')),('\U0001f4de Phone',contact.get('phone','—')),('\U0001f4e7 Email',contact.get('email','—'))]
-    for i,(lbl,val) in enumerate(cards):
-        x=.25 if i<2 else 5.12; y=2.55+(i%2)*.8
-        cc=_rrect(sl, IN(x), IN(y), IN(4.63), IN(.68), WHITE); cc.line.color.rgb=LGREY; cc.line.width=Pt(.5)
-        _rect(sl, IN(x), IN(y), IN(4.63), IN(.07), t.primary if i<2 else t.accent)
-        _txt(sl, IN(x+.12), IN(y+.1), IN(4.4), IN(.26), lbl, 9.5, t.primary, bold=True)
-        _txt(sl, IN(x+.12), IN(y+.34), IN(4.4), IN(.28), str(val), 11, DARK)
-    _txt(sl, IN(.5), IN(4.38), IN(9), IN(.25), cn, 12, t.primary, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
-    _rect(sl, IN(0), IN(5.45), IN(10), IN(.18), t.primary)
+    badge_colors = [t.primary, t.dark_bg, t.primary, t.dark_bg]
+
+    for i, b in enumerate(pts[:n_items]):
+        y = sy + i * ih
+
+        # Parse  "YEAR: Title — Body"  or  "YEAR: Full text"
+        if ':' in b:
+            yr   = b.split(':', 1)[0].strip()[:12]
+            rest = b.split(':', 1)[1].strip()
+        else:
+            yr   = '—'
+            rest = b
+
+        # Split headline from detail
+        if ' — ' in rest:
+            headline, detail = rest.split(' — ', 1)
+        elif '. ' in rest and len(rest.split('. ', 1)[0]) <= 90:
+            headline, detail = rest.split('. ', 1)
+        else:
+            headline = rest[:90]
+            detail   = rest[90:] if len(rest) > 90 else ''
+
+        # Year badge
+        _rrect(sl, IN(0.28), IN(y+0.06), IN(1.10), IN(0.32), badge_colors[i])
+        _txt(sl, IN(0.28), IN(y+0.06), IN(1.10), IN(0.32),
+             yr, 9.5, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
+
+        # Dot on timeline
+        _rrect(sl, IN(1.56), IN(y+0.13), IN(0.16), IN(0.16), t.accent)
+
+        # Content box
+        ch = ih - 0.12
+        cb = _rrect(sl, IN(1.85), IN(y+0.04), IN(7.85), IN(ch),
+                    WHITE if bg != WHITE else LBLU)
+        cb.line.color.rgb = LGREY; cb.line.width = Pt(0.5)
+        _rect(sl, IN(1.85), IN(y+0.04), IN(0.07), IN(ch), t.accent)
+
+        hfs = _card_fs(headline, 10.5, ideal_chars=60)
+        _txt(sl, IN(2.05), IN(y+0.07), IN(7.55), IN(0.28),
+             headline, hfs, t.primary, bold=True, fname='Calibri')
+        if detail:
+            dfs = _card_fs(detail, 9.0, ideal_chars=120)
+            _txt(sl, IN(2.05), IN(y+0.38), IN(7.55), IN(ch-0.40),
+                 _clip(detail, 200), dfs, DARK, fname='Calibri', wrap=True)
 
 
 # ══════════════════════════════════════════════════════════════
-# DISPATCHER
+# PROCESS / OPERATIONS
+# Header bar · Numbered steps (left) · Locations/info (right)
+# ══════════════════════════════════════════════════════════════
+
+def _R_process(prs, layout, t, sd, cn, wu, n, total, bg=WHITE):
+    sl = prs.slides.add_slide(layout)
+    _bg(sl, bg)
+    title = sd.get('title', '')
+    desc  = sd.get('description', '')
+    pts   = sd.get('key_points', [])
+
+    _header(sl, t, title, desc)
+    _footer(sl, t, cn, wu)
+
+    CY = 1.35; CH = 3.70
+    LW = 5.55; RX = 6.05; RW = 3.68
+
+    # Left panel
+    _rect(sl, IN(0.28), IN(CY), IN(LW), IN(CH),
+          t.soft if bg == WHITE else WHITE, LGREY, Pt(0.5))
+    _accent_bar(sl, t, 0.28, CY, CH, t.primary)
+
+    parts = title.split('&')
+    left_head  = parts[0].strip() if parts else 'Process'
+    right_head = parts[-1].strip() if len(parts) > 1 else 'Operations'
+    _section_head(sl, t, 0.48, CY+0.08, LW-0.3, left_head, fs=13)
+
+    step_h = 0.54
+    for i, pt in enumerate(pts[:6]):
+        sy2 = CY + 0.55 + i * step_h
+        if sy2 + 0.4 > CY + CH: break
+        hdr, body = _smart_split(pt)
+        _rrect(sl, IN(0.42), IN(sy2+0.03), IN(0.32), IN(0.32), t.primary)
+        _txt(sl, IN(0.42), IN(sy2+0.03), IN(0.32), IN(0.32),
+             f'{i+1:02d}', 8, WHITE, bold=True, align=PP_ALIGN.CENTER, fname='Calibri')
+        _txt(sl, IN(0.88), IN(sy2+0.01), IN(LW-0.65), IN(0.25),
+             _clip(hdr, 45), 9.5, t.primary, bold=True, fname='Calibri')
+        bfs = _card_fs(body, 8.5, ideal_chars=80)
+        _txt(sl, IN(0.88), IN(sy2+0.27), IN(LW-0.65), IN(0.23),
+             _clip(body, 130), bfs, DARK, fname='Calibri', wrap=True)
+
+    # Right panel
+    _rect(sl, IN(RX), IN(CY), IN(RW), IN(CH),
+          t.soft if bg == WHITE else WHITE, LGREY, Pt(0.5))
+    _accent_bar(sl, t, RX, CY, CH, t.accent)
+    _section_head(sl, t, RX+0.2, CY+0.08, RW-0.3, right_head, fs=13)
+
+    right_pts = pts[6:] if len(pts) > 6 else pts[4:] if len(pts) > 4 else pts[3:]
+    for i, pt in enumerate(right_pts[:5]):
+        ry = CY + 0.55 + i * 0.66
+        if ry + 0.4 > CY + CH: break
+        hdr, body = _smart_split(pt)
+        _txt(sl, IN(RX+0.2), IN(ry),       IN(RW-0.3), IN(0.28),
+             f'▸  {_clip(hdr, 40)}', 10.0, t.primary, bold=True, fname='Calibri')
+        bfs = _card_fs(body, 8.5, ideal_chars=70)
+        _txt(sl, IN(RX+0.2), IN(ry+0.30), IN(RW-0.3), IN(0.28),
+             _clip(body, 100), bfs, DARK, fname='Calibri', wrap=True)
+        _divider(sl, RX+0.2, ry+0.62, RW-0.3)
+
+
+# ══════════════════════════════════════════════════════════════
+# DARK HERO SLIDE
+# Dark navy bg · Portrait area (left) · Rich content (right)
+# For: Founder, Vision/Mission, Growth, Digital, Testimonials
+# ══════════════════════════════════════════════════════════════
+
+def _R_dark(prs, layout, t, sd, cn, wu, n, total):
+    sl = prs.slides.add_slide(layout)
+    _bg(sl, t.dark_bg)
+
+    title = sd.get('title', '')
+    desc  = sd.get('description', '')
+    pts   = sd.get('key_points', [])
+    stats = sd.get('stats')
+
+    # Thin accent lines at top
+    _rect(sl, IN(0), IN(0),    IN(10), IN(0.10), t.darker)
+    _rect(sl, IN(0), IN(0.10), IN(10), IN(0.04), t.accent)
+
+    # Slide counter
+    _txt(sl, IN(9.2), IN(0.18), IN(0.75), IN(0.28),
+         f'{n}/{total}', 8, t.chrome, align=PP_ALIGN.RIGHT, fname='Calibri')
+
+    # Left portrait panel
+    _rrect(sl, IN(0.45), IN(0.70), IN(2.80), IN(2.80), t.card_hdr)
+    initials = ''.join(w[0].upper() for w in title.replace('&','').split()[:2])
+    _txt(sl, IN(0.45), IN(0.70), IN(2.80), IN(2.80),
+         initials or 'CO', 52, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
+
+    # Name / role below portrait
+    name_text = pts[0] if pts else title
+    name_text = _smart_split(name_text)[0] if ':' in name_text else _clip(name_text, 40)
+    _txt(sl, IN(0.45), IN(3.60), IN(2.80), IN(0.35), name_text, 12, CREAM,
+         align=PP_ALIGN.CENTER, fname='Calibri')
+    _txt(sl, IN(0.45), IN(3.95), IN(2.80), IN(0.30), cn, 10, SBLU,
+         align=PP_ALIGN.CENTER, fname='Calibri')
+
+    # Divider line
+    _rect(sl, IN(3.60), IN(0.60), IN(0.06), IN(4.50), t.chrome)
+
+    # Right — title, subtitle, content
+    _txt(sl, IN(3.90), IN(0.20), IN(5.90), IN(0.55),
+         title, 30, WHITE, bold=True, fname='Georgia', wrap=True)
+    if desc:
+        _txt(sl, IN(3.90), IN(0.78), IN(5.90), IN(0.38),
+             _clip(desc, 130), 12, CREAM, italic=True, fname='Calibri')
+    _rect(sl, IN(3.90), IN(1.25), IN(5.90), IN(0.04), t.accent)
+
+    # Main body text from remaining points
+    body_pts = pts[1:] if len(pts) > 1 else pts
+    if body_pts:
+        body_text = ' '.join(_clip(p, 120) for p in body_pts[:4])
+        _txt(sl, IN(3.90), IN(1.38), IN(5.85), IN(2.85),
+             body_text, 11.5, SBLU, fname='Calibri', wrap=True)
+
+    # Stats bar at bottom right
+    if stats and isinstance(stats, dict):
+        items = list(stats.items())[:5]
+        _rect(sl, IN(3.90), IN(4.45), IN(5.90), IN(0.75), t.darker)
+        sw = 5.90 / len(items)
+        for i, (lbl, val) in enumerate(items):
+            sx = 3.90 + i * sw
+            vfs = _adaptive_fs(str(val), 11, ideal_chars=6)
+            _txt(sl, IN(sx+0.05), IN(4.52), IN(sw-0.1), IN(0.28),
+                 str(val), vfs, t.accent, bold=True, fname='Georgia')
+            _txt(sl, IN(sx+0.05), IN(4.80), IN(sw-0.1), IN(0.22),
+                 lbl, 8.5, SBLU, fname='Calibri')
+
+    # Footer
+    _rect(sl, IN(0), IN(5.28), IN(10), IN(0.35), t.darker)
+    _txt(sl, IN(0.3), IN(5.29), IN(9.4), IN(0.30),
+         f'{cn}  |  {wu}', 8.5, GREY, fname='Calibri')
+
+
+# ══════════════════════════════════════════════════════════════
+# CLOSING SLIDE
+# Dark bg · Thank you · 2×2 contact cards
+# ══════════════════════════════════════════════════════════════
+
+def _R_closing(prs, layout, t, sd, data):
+    sl  = prs.slides.add_slide(layout)
+    cn  = data.get('company_name', '')
+    wu  = data.get('website', '')
+    con = data.get('contact', {})
+
+    _bg(sl, t.primary)
+    _rect(sl, IN(0), IN(0),    IN(10), IN(0.10), t.darker)
+    _rect(sl, IN(0), IN(0.10), IN(10), IN(0.04), t.accent)
+
+    # Thank You
+    _txt(sl, IN(0.5), IN(0.40), IN(9.0), IN(1.10),
+         'Thank You', 52, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
+    _rect(sl, IN(3.5), IN(1.55), IN(3.0), IN(0.06), t.accent)
+
+    # Closing message
+    desc = sd.get('description', 'Thank you for your time.')
+    _txt(sl, IN(0.8), IN(1.72), IN(8.4), IN(0.50),
+         _clip(desc, 160), 14, CREAM, italic=True, align=PP_ALIGN.CENTER,
+         fname='Calibri', wrap=True)
+
+    # 2×2 contact cards
+    cards = [
+        ('🌐 Website',  wu or '—'),
+        ('📍 Address',  con.get('address', '—')),
+        ('📞 Phone',    con.get('phone',   '—')),
+        ('✉️ Email',    con.get('email',   '—')),
+    ]
+    for i, (lbl, val) in enumerate(cards):
+        x = 0.25 if i < 2 else 5.12
+        y = 2.55 + (i % 2) * 0.82
+        cc = _rrect(sl, IN(x), IN(y), IN(4.63), IN(0.70),
+                    t.dark_bg, t.accent, lw=Pt(0.8))
+        _rect(sl, IN(x), IN(y), IN(4.63), IN(0.07),
+              t.accent if i % 2 == 0 else t.chrome)
+        _txt(sl, IN(x+0.12), IN(y+0.10), IN(4.4), IN(0.26),
+             lbl, 9.5, t.accent, bold=True, fname='Calibri')
+        vfs = _card_fs(str(val), 11.0, ideal_chars=50)
+        _txt(sl, IN(x+0.12), IN(y+0.36), IN(4.4), IN(0.28),
+             _clip(str(val), 60), vfs, WHITE, fname='Calibri')
+
+    # Company + website
+    _txt(sl, IN(0.5), IN(4.38), IN(9.0), IN(0.25),
+         cn, 12, t.accent, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
+    _rect(sl, IN(0), IN(5.28), IN(10), IN(0.35), t.darker)
+    _txt(sl, IN(0.3), IN(5.29), IN(9.4), IN(0.30),
+         wu, 10, SBLU, italic=True, align=PP_ALIGN.CENTER, fname='Calibri')
+
+
+# ══════════════════════════════════════════════════════════════
+# LAYOUT PICKER
 # ══════════════════════════════════════════════════════════════
 
 def _pick_layout(sd, idx, total):
     n     = sd.get('slide_number', idx + 1)
     title = sd.get('title', '').lower()
     pts   = sd.get('key_points', [])
-    stats = sd.get('stats')
-    has_stats = bool(stats and isinstance(stats, dict) and len(stats) >= 3)
 
-    if n == 1:     return 'title'
-    if n == total: return 'closing'
+    if n == 1:      return 'title'
+    if n == total:  return 'closing'
 
-    # Timeline: history / journey / step-by-step / process slides
-    timeline_kw = ('history', 'timeline', 'journey', 'milestone', 'evolution',
-                   'operation', 'process', 'step', 'phase', 'stage',
-                   'distribution', 'supply', 'delivery', 'logistic')
+    # Dark hero slides
+    dark_kw = ('founder', 'legacy', 'eminent', 'vision', 'mission', 'value',
+                'growth', 'scale', 'digital product', 'toppers', 'testimonial',
+                'csr', 'roadmap', 'future', 'award', 'recogni')
+    if any(k in title for k in dark_kw):
+        return 'dark'
+
+    # Timeline
+    timeline_kw = ('history', 'timeline', 'journey', 'milestone', 'evolution')
     if any(k in title for k in timeline_kw):
         return 'timeline'
 
-    # Feature cards: distinct named items that suit a visual grid
-    cards_kw = ('strength', 'usp', 'unique', 'value', 'vision', 'mission',
-                'advantage', 'differenti', 'why choose', 'why us',
-                'product', 'service', 'offering',
-                'team', 'director', 'leadership', 'founder', 'legacy',
-                'audience', 'target', 'award', 'recogni', 'certif',
-                'geographic', 'reach', 'network', 'dealer', 'customer', 'client',
-                'brand', 'marketing', 'roadmap')
+    # Process / operations
+    process_kw = ('operation', 'process', 'manufactur', 'production', 'wareho',
+                  'logistic', 'step', 'phase', 'delivery', 'supply')
+    if any(k in title for k in process_kw):
+        return 'process'
+
+    # Card grid
+    cards_kw = ('strength', 'usp', 'unique', 'product', 'service', 'offering',
+                'customer', 'client', 'audience', 'target', 'director', 'team',
+                'leadership', 'network', 'dealer', 'geographic', 'reach',
+                'brand', 'marketing', 'digital presence', 'distribution')
     if any(k in title for k in cards_kw) and len(pts) >= 3:
         return 'cards'
 
-    # Two-column: any slide with 6+ bullets
+    # Label:value two-col (data-heavy classification slides)
+    lv_kw = ('industry', 'business type', 'overview', 'profile',
+              'classification', 'about', 'introduction')
+    if any(k in title for k in lv_kw):
+        return 'lv_two_col'
+
+    # Two-col bullets for 6+ points
     if len(pts) >= 6:
-        return 'twocol'
+        return 'two_col'
 
-    # Two-column: overview, industry, growth, profile slides (text-heavy)
-    twocol_kw = ('overview', 'industry', 'business', 'profile', 'about',
-                 'growth', 'general', 'introduction')
-    if any(k in title for k in twocol_kw) and len(pts) >= 3:
-        return 'twocol'
-
-    # Two-column: every 3rd content slide for variety
-    if 3 <= n <= total - 2 and n % 3 == 0 and len(pts) >= 3:
-        return 'twocol'
-
-    # Two-column: every 4th slide (offset) for additional variety
-    if n % 4 == 2 and len(pts) >= 4:
-        return 'twocol'
-
-    return 'content'
+    return 'lv_two_col'
 
 
-def build_presentation(data: dict,
-                       primary_hex: str = '1B3A6B',
-                       accent_hex:  str = 'C8A951') -> bytes:
-    t       = Theme(primary_hex, accent_hex)
-    industry = data.get('industry_type', '')
-    style    = _pick_style(industry)
+# ══════════════════════════════════════════════════════════════
+# MAIN ENTRY POINT
+# ══════════════════════════════════════════════════════════════
+
+def build_presentation(data, primary_hex='1A2E5A', accent_hex='C9962B'):
+    t = Theme(primary_hex, accent_hex)
 
     prs = Presentation()
     prs.slide_width  = IN(10)
     prs.slide_height = IN(5.625)
-    blank  = prs.slide_layouts[6]
+    blank = prs.slide_layouts[6]
 
     cn     = data.get('company_name', 'Company')
     wu     = data.get('website', '')
     slides = data.get('slides', [])
     total  = len(slides)
 
-    # Style dispatch table
-    dispatch = {
-        'professional': {
-            'title':'_A_title','closing':'_A_closing','content':'_A_content',
-            'twocol':'_A_twocol','timeline':'_A_timeline','cards':'_A_cards',
-        },
-        'bold': {
-            'title':'_B_title','closing':'_B_closing','content':'_B_content',
-            'twocol':'_B_twocol','timeline':'_B_timeline','cards':'_B_cards',
-        },
-        'cards': {
-            'title':'_C_title','closing':'_C_closing','content':'_C_content',
-            'twocol':'_C_twocol','timeline':'_C_timeline','cards':'_C_feature_cards',
-        },
-    }
-    fn_map = dispatch.get(style, dispatch['professional'])
-    fns = {
-        '_A_title':_A_title,'_A_closing':_A_closing,'_A_content':_A_content,
-        '_A_twocol':_A_twocol,'_A_timeline':_A_timeline,'_A_cards':_A_cards,
-        '_B_title':_B_title,'_B_closing':_B_closing,'_B_content':_B_content,
-        '_B_twocol':_B_twocol,'_B_timeline':_B_timeline,'_B_cards':_B_cards,
-        '_C_title':_C_title,'_C_closing':_C_closing,'_C_content':_C_content,
-        '_C_twocol':_C_twocol,'_C_timeline':_C_timeline,'_C_feature_cards':_C_feature_cards,
-    }
+    def bg(idx):
+        """Alternate White / Light-blue for regular slides."""
+        return WHITE if idx % 2 == 0 else LBLU
 
     for idx, sd in enumerate(slides):
-        n      = sd.get('slide_number', idx+1)
+        n      = sd.get('slide_number', idx + 1)
         layout = _pick_layout(sd, idx, total)
-        fn     = fns[fn_map[layout]]
 
-        if layout in ('title','closing'):
-            fn(prs, blank, t, sd, data)
-        else:
-            fn(prs, blank, t, sd, cn, wu, n, total)
+        if layout == 'title':
+            _R_title(prs, blank, t, sd, data)
+        elif layout == 'closing':
+            _R_closing(prs, blank, t, sd, data)
+        elif layout == 'dark':
+            _R_dark(prs, blank, t, sd, cn, wu, n, total)
+        elif layout == 'timeline':
+            _R_timeline(prs, blank, t, sd, cn, wu, n, total, bg=bg(idx))
+        elif layout == 'process':
+            _R_process(prs, blank, t, sd, cn, wu, n, total, bg=bg(idx))
+        elif layout == 'cards':
+            _R_cards(prs, blank, t, sd, cn, wu, n, total, bg=bg(idx))
+        elif layout == 'lv_two_col':
+            _R_lv_two_col(prs, blank, t, sd, cn, wu, n, total, bg=bg(idx))
+        else:  # two_col
+            _R_two_col(prs, blank, t, sd, cn, wu, n, total, bg=bg(idx))
 
     buf = io.BytesIO()
-    prs.save(buf); buf.seek(0)
-    return buf.getvalue(), style
+    prs.save(buf)
+    buf.seek(0)
+    return buf.getvalue(), 'reference'
