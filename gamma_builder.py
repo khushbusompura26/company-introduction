@@ -164,7 +164,9 @@ def pick_gamma_theme(industry: str, primary_hex: str) -> str:
 def build_gamma_prompt(company_data: dict) -> str:
     """
     Convert company research JSON into a rich structured markdown prompt
-    that Gamma will render as a professional multi-slide presentation.
+    with explicit --- card breaks so Gamma honours the slide structure.
+    Each section is separated by '---' and cardSplit='inputTextBreaks' is
+    set in the API payload, giving one Gamma card per slide.
     """
     cn      = company_data.get('company_name', 'Company')
     tag     = company_data.get('tagline', '')
@@ -173,27 +175,27 @@ def build_gamma_prompt(company_data: dict) -> str:
     slides  = company_data.get('slides', [])
     total   = len(slides)
 
-    lines = []
+    cards = []  # each entry = one card's markdown text
 
-    # ── Cover / title ───────────────────────────────────────────
-    lines.append(f"# {cn}")
+    # ── Card 1: Cover / title ────────────────────────────────────
+    cover_lines = [f"# {cn}"]
     if tag:
-        lines.append(f"**{tag}**")
+        cover_lines.append(f"### {tag}")
     if wu:
-        lines.append(f"*{wu}*")
-    lines.append("")
-
-    # Pull title-slide stats as hero metrics
+        cover_lines.append(f"*{wu}*")
+    # Hero stats on the cover
     title_slide = next((s for s in slides if s.get('slide_number') == 1), {})
-    hero_stats = title_slide.get('stats') or {}
+    hero_stats  = title_slide.get('stats') or {}
     if hero_stats:
-        stat_line = "  |  ".join(
-            f"**{v}** {k}" for k, v in list(hero_stats.items())[:4]
-        )
-        lines.append(stat_line)
-        lines.append("")
+        items = list(hero_stats.items())[:4]
+        # Render as a small table for Gamma to turn into a stat grid
+        cover_lines.append("")
+        cover_lines.append("| " + " | ".join(k for k, _ in items) + " |")
+        cover_lines.append("| " + " | ".join("---" for _ in items) + " |")
+        cover_lines.append("| " + " | ".join(str(v) for _, v in items) + " |")
+    cards.append('\n'.join(cover_lines))
 
-    # ── Content slides ──────────────────────────────────────────
+    # ── Content slides ───────────────────────────────────────────
     for sd in slides:
         n     = sd.get('slide_number', 0)
         title = sd.get('title', '')
@@ -201,50 +203,49 @@ def build_gamma_prompt(company_data: dict) -> str:
         pts   = sd.get('key_points', [])
         stats = sd.get('stats')
 
-        # Skip slide 1 (already handled above) and last slide (handled below)
         if n == 1 or n == total:
-            continue
+            continue  # covered by cover and closing cards
 
-        lines.append(f"## {title}")
-        lines.append("")
+        card_lines = [f"## {title}", ""]
 
         if desc:
-            lines.append(f"*{desc}*")
-            lines.append("")
+            card_lines.append(f"> {desc}")
+            card_lines.append("")
 
-        # Stats as a table for Gamma to render visually
+        # Stats as a visual table Gamma can render as a grid
         if stats and isinstance(stats, dict) and stats:
-            lines.append("| Metric | Value |")
-            lines.append("|--------|-------|")
-            for k, v in list(stats.items())[:5]:
-                lines.append(f"| {k} | {v} |")
-            lines.append("")
+            items = list(stats.items())[:5]
+            card_lines.append("| " + " | ".join(k for k, _ in items) + " |")
+            card_lines.append("| " + " | ".join("---" for _ in items) + " |")
+            card_lines.append("| " + " | ".join(str(v) for _, v in items) + " |")
+            card_lines.append("")
 
-        # Bullet points
+        # Key points as bullets
         if pts:
             for pt in pts:
-                lines.append(f"- {pt}")
-            lines.append("")
+                card_lines.append(f"- {pt}")
+            card_lines.append("")
 
-    # ── Closing slide ────────────────────────────────────────────
-    closing = next((s for s in slides if s.get('slide_number') == total), {})
-    lines.append("## Thank You")
-    lines.append("")
-    close_desc = closing.get('description', 'Thank you for your time.')
+        cards.append('\n'.join(card_lines))
+
+    # ── Closing card ─────────────────────────────────────────────
+    closing   = next((s for s in slides if s.get('slide_number') == total), {})
+    close_lines = ["## Thank You", ""]
+    close_desc  = closing.get('description', '')
     if close_desc:
-        lines.append(f"*{close_desc}*")
-        lines.append("")
+        close_lines.append(f"> {close_desc}")
+        close_lines.append("")
 
     contact_lines = []
-    if wu:               contact_lines.append(f"🌐 {wu}")
-    if contact.get('phone'):   contact_lines.append(f"📞 {contact['phone']}")
-    if contact.get('email'):   contact_lines.append(f"📧 {contact['email']}")
-    if contact.get('address'): contact_lines.append(f"📍 {contact['address']}")
-    if contact_lines:
-        lines.extend(contact_lines)
-        lines.append("")
+    if wu:                         contact_lines.append(f"🌐 **Website:** {wu}")
+    if contact.get('phone'):       contact_lines.append(f"📞 **Phone:** {contact['phone']}")
+    if contact.get('email'):       contact_lines.append(f"📧 **Email:** {contact['email']}")
+    if contact.get('address'):     contact_lines.append(f"📍 **Address:** {contact['address']}")
+    close_lines.extend(contact_lines)
+    cards.append('\n'.join(close_lines))
 
-    return '\n'.join(lines)
+    # Join all cards with explicit break markers
+    return '\n\n---\n\n'.join(cards)
 
 
 # ── Gamma API call ───────────────────────────────────────────────
@@ -282,19 +283,25 @@ def generate_with_gamma(company_data: dict,
         'inputText':  prompt,
         'themeId':    theme_id,
         'format':     'presentation',
-        'numCards':   num_slides,
-        'textMode':   'preserve',
+        # 'generate' lets Gamma's AI design beautiful layouts from the outline.
+        # 'preserve' bypasses the AI — that's why the old output was unimpressive.
+        'textMode':   'generate',
+        # cardSplit='inputTextBreaks' tells Gamma to honour the '---' separators
+        # in our prompt, so each section becomes exactly one slide.
+        'cardSplit':  'inputTextBreaks',
         'cardOptions': {
             'dimensions': '16x9',
         },
         'imageOptions': {
-            'source':      'pexels',
+            # AI-generated images match content better than stock photos
+            'source':      'aiGenerated',
             'stylePreset': 'photorealistic',
         },
         'textOptions': {
             'language': 'en-in',
             'tone':     'professional',
-            'amount':   'medium',
+            # 'detailed' gives richer slide content vs 'medium'
+            'amount':   'detailed',
         },
     }
     if export_pptx:

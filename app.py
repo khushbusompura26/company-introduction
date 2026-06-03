@@ -58,7 +58,7 @@ st.markdown("# 🎯 Company Introduction Generator")
 st.markdown(
     '<p class="subtitle">'
     'Auto-branded PPT + Hinglish Script · Brand colours from website · '
-    '✨ Gamma Pro Design or 📊 Classic PPTX'
+    '✨ Gamma AI Design <em>(recommended)</em> or 📊 Classic PPTX'
     '</p>',
     unsafe_allow_html=True
 )
@@ -73,20 +73,31 @@ with st.form("gen_form", clear_on_submit=False):
     )
 
     st.markdown("---")
-    st.markdown("##### ✨ Gamma Pro Design *(optional — for beautiful AI-designed slides)*")
+    st.markdown(
+        "##### ✨ Gamma AI Design &nbsp;<span style='background:#6B48FF;color:white;"
+        "padding:2px 9px;border-radius:12px;font-size:.72rem;font-weight:700'>"
+        "RECOMMENDED</span>",
+        unsafe_allow_html=True
+    )
+    st.caption(
+        "Gamma creates beautifully designed, image-rich presentations automatically. "
+        "Leave blank to fall back to Classic PPTX."
+    )
     c1, c2 = st.columns([3, 2])
     with c1:
         gamma_api_key = st.text_input(
             "GAMMA API KEY",
             type="password",
-            placeholder="Leave blank to use Classic PPTX",
+            placeholder="Paste your Gamma API key here (free)",
             help="Get your free API key at gamma.app/settings/api"
         )
     with c2:
         st.markdown(
             '<div style="padding-top:1.9rem;font-size:.82rem;color:#6B48FF">'
             '🔗 <a href="https://gamma.app/settings/api" target="_blank" '
-            'style="color:#6B48FF">Get Gamma API key →</a></div>',
+            'style="color:#6B48FF;font-weight:600">Get free Gamma key →</a><br>'
+            '<span style="color:#888;font-size:.75rem">Free account · No credit card</span>'
+            '</div>',
             unsafe_allow_html=True
         )
 
