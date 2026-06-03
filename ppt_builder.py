@@ -109,6 +109,21 @@ def _rrect(sl, l, t, w, h, fill, line=None, lw=Pt(1.2)):
     else:    sh.line.fill.background()
     return sh
 
+def _oval(sl, cx, cy, r, fill, line=None, lw=Pt(0)):
+    """Draw a circle centred at (cx, cy) with radius r — all in raw EMU/points."""
+    sh = sl.shapes.add_shape(MSO_SHAPE.OVAL, cx - r, cy - r, r * 2, r * 2)
+    sh.fill.solid(); sh.fill.fore_color.rgb = fill
+    if line: sh.line.color.rgb = line; sh.line.width = lw
+    else:    sh.line.fill.background()
+    return sh
+
+def _icon_circle(sl, cx, cy, r, bg, label, fs, fg, fname='Georgia'):
+    """Filled circle with centred text (icon / number badge)."""
+    _oval(sl, cx, cy, r, bg)
+    d = r * 2
+    _txt(sl, cx - r, cy - r, d, d, label, fs, fg,
+         bold=True, align=PP_ALIGN.CENTER, fname=fname)
+
 def _txt(sl, l, t, w, h, text, fs, color,
          bold=False, italic=False, align=PP_ALIGN.LEFT,
          fname='Calibri', wrap=True):
@@ -187,6 +202,18 @@ def _R_title(prs, layout, t, sd, data):
     stats   = sd.get('stats') or {}
 
     _bg(sl, t.primary)
+
+    # ── Decorative background circles ──────────────────────────
+    # Large circle — bottom-right quadrant
+    _oval(sl, IN(8.8),  IN(5.2),  IN(2.6), t.darker)
+    _oval(sl, IN(9.2),  IN(5.0),  IN(1.9), t.card_hdr)
+    # Medium circle — top-left
+    _oval(sl, IN(0.0),  IN(0.4),  IN(1.8), t.darker)
+    _oval(sl, IN(-0.2), IN(0.2),  IN(1.3), t.card_hdr)
+    # Small accent dot — top-right
+    _oval(sl, IN(9.6),  IN(0.5),  IN(0.5), t.accent)
+    _oval(sl, IN(0.5),  IN(5.0),  IN(0.4), t.accent)
+
     _rect(sl, IN(0), IN(0),    IN(10), IN(0.12), t.darker)
     _rect(sl, IN(0), IN(5.50), IN(10), IN(0.12), t.darker)
 
@@ -401,9 +428,15 @@ def _R_cards(prs, layout, t, sd, cn, wu, n, total, bg=WHITE):
         # Dark header bar
         _rect(sl, IN(x), IN(y), IN(CARD_W), IN(0.42), hdr_colors[i])
 
-        # Card title (inside header bar)
-        hfs = _card_fs(hdr, 11.0, ideal_chars=40)
-        _txt(sl, IN(x+0.12), IN(y+0.07), IN(CARD_W-0.24), IN(0.32),
+        # Numbered icon circle on the header bar (right-side)
+        _icon_circle(sl,
+            cx = IN(x + CARD_W - 0.25), cy = IN(y + 0.21),
+            r  = IN(0.17), bg = t.accent,
+            label = str(i + 1), fs = 8, fg = t.dark_bg)
+
+        # Card title (inside header bar, leave room for circle badge)
+        hfs = _card_fs(hdr, 11.0, ideal_chars=35)
+        _txt(sl, IN(x+0.12), IN(y+0.07), IN(CARD_W-0.55), IN(0.32),
              hdr, hfs, WHITE, bold=True, fname='Georgia', wrap=True)
 
         # Card body
@@ -572,6 +605,12 @@ def _R_dark(prs, layout, t, sd, cn, wu, n, total):
     pts   = sd.get('key_points', [])
     stats = sd.get('stats')
 
+    # ── Decorative background circles ──────────────────────────
+    _oval(sl, IN(9.5),  IN(5.0),  IN(2.2), t.darker)
+    _oval(sl, IN(10.0), IN(5.4),  IN(1.5), t.card_hdr)
+    _oval(sl, IN(0.2),  IN(5.2),  IN(1.1), t.darker)
+    _oval(sl, IN(9.8),  IN(0.2),  IN(0.6), t.accent)
+
     # Thin accent lines at top
     _rect(sl, IN(0), IN(0),    IN(10), IN(0.10), t.darker)
     _rect(sl, IN(0), IN(0.10), IN(10), IN(0.04), t.accent)
@@ -632,6 +671,95 @@ def _R_dark(prs, layout, t, sd, cn, wu, n, total):
 
 
 # ══════════════════════════════════════════════════════════════
+# QUOTE / IMPACT SLIDE
+# Dark bg · Large statement text · 3 supporting pillars
+# For: Vision, Mission, Values, CSR, Awards
+# ══════════════════════════════════════════════════════════════
+
+def _R_quote(prs, layout, t, sd, cn, wu, n, total):
+    sl = prs.slides.add_slide(layout)
+    _bg(sl, t.dark_bg)
+
+    title = sd.get('title', '')
+    desc  = sd.get('description', '') or ''
+    pts   = sd.get('key_points', [])
+
+    # ── Decorative circles ──────────────────────────────────────
+    _oval(sl, IN(-0.5), IN(5.6),  IN(2.5), t.darker)
+    _oval(sl, IN(10.5), IN(-0.3), IN(2.2), t.darker)
+    _oval(sl, IN(10.2), IN(0.0),  IN(1.4), t.card_hdr)
+    _oval(sl, IN(0.2),  IN(0.0),  IN(0.5), t.accent)
+    _oval(sl, IN(9.8),  IN(5.3),  IN(0.4), t.accent)
+
+    # ── Accent lines ────────────────────────────────────────────
+    _rect(sl, IN(0), IN(0),    IN(10), IN(0.10), t.darker)
+    _rect(sl, IN(0), IN(0.10), IN(10), IN(0.04), t.accent)
+
+    # ── Slide counter ───────────────────────────────────────────
+    _txt(sl, IN(9.2), IN(0.18), IN(0.75), IN(0.28),
+         f'{n}/{total}', 8, t.chrome, align=PP_ALIGN.RIGHT, fname='Calibri')
+
+    # ── Title bar ───────────────────────────────────────────────
+    _txt(sl, IN(0.5), IN(0.22), IN(9.0), IN(0.45),
+         title, 22, WHITE, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
+    _rect(sl, IN(4.0), IN(0.72), IN(2.0), IN(0.05), t.accent)
+
+    # ── Main statement quote (description) ──────────────────────
+    if desc:
+        statement = _clip(desc, 200)
+        # Large decorative quote marks
+        _txt(sl, IN(0.3), IN(0.80), IN(0.6), IN(0.55), '“', 40, t.accent,
+             bold=True, fname='Georgia')
+        _txt(sl, IN(0.7), IN(0.92), IN(8.6), IN(0.85),
+             statement, 15, CREAM, italic=True,
+             align=PP_ALIGN.CENTER, fname='Calibri', wrap=True)
+        _txt(sl, IN(9.1), IN(1.40), IN(0.6), IN(0.55), '”', 40, t.accent,
+             bold=True, fname='Georgia', align=PP_ALIGN.RIGHT)
+
+    # ── Three pillar boxes ───────────────────────────────────────
+    pillar_pts = pts[:3] if len(pts) >= 3 else (pts + [''] * 3)[:3]
+    pillar_colors = [t.primary, t.dark_bg, t.primary]
+    border_colors = [t.accent,  t.chrome,  t.accent]
+    icon_labels   = ['01', '02', '03']
+
+    PW = 2.90; PH = 1.85; GAP = 0.28; PY = 1.98
+    xs = [0.28 + i * (PW + GAP) for i in range(3)]
+
+    for i, (pt, px) in enumerate(zip(pillar_pts, xs)):
+        hdr, body = _smart_split(pt) if pt else ('—', '')
+
+        # Pillar card
+        cb = _rrect(sl, IN(px), IN(PY), IN(PW), IN(PH), pillar_colors[i],
+                    border_colors[i], lw=Pt(1.2))
+
+        # Top accent band
+        _rect(sl, IN(px), IN(PY), IN(PW), IN(0.07), border_colors[i])
+
+        # Icon circle at top-centre of card
+        _icon_circle(sl,
+            cx = IN(px + PW / 2), cy = IN(PY + 0.38),
+            r  = IN(0.26), bg = t.accent,
+            label = icon_labels[i], fs = 9, fg = t.dark_bg)
+
+        # Pillar title
+        hfs = _card_fs(hdr, 11.5, ideal_chars=30)
+        _txt(sl, IN(px+0.12), IN(PY+0.70), IN(PW-0.24), IN(0.32),
+             hdr, hfs, WHITE, bold=True, align=PP_ALIGN.CENTER, fname='Georgia')
+
+        # Pillar body
+        if body:
+            bfs = _card_fs(body, 9.0, ideal_chars=80)
+            _txt(sl, IN(px+0.14), IN(PY+1.04), IN(PW-0.28), IN(PH-1.12),
+                 _clip(body, 130), bfs, SBLU, align=PP_ALIGN.CENTER,
+                 fname='Calibri', wrap=True)
+
+    # ── Footer ───────────────────────────────────────────────────
+    _rect(sl, IN(0), IN(5.28), IN(10), IN(0.35), t.darker)
+    _txt(sl, IN(0.3), IN(5.29), IN(9.4), IN(0.30),
+         f'{cn}  |  {wu}', 8.5, GREY, fname='Calibri')
+
+
+# ══════════════════════════════════════════════════════════════
 # CLOSING SLIDE
 # Dark bg · Thank you · 2×2 contact cards
 # ══════════════════════════════════════════════════════════════
@@ -643,6 +771,14 @@ def _R_closing(prs, layout, t, sd, data):
     con = data.get('contact', {})
 
     _bg(sl, t.primary)
+
+    # ── Decorative background circles ──────────────────────────
+    _oval(sl, IN(9.8),  IN(5.2),  IN(2.4), t.darker)
+    _oval(sl, IN(10.2), IN(5.5),  IN(1.6), t.card_hdr)
+    _oval(sl, IN(-0.2), IN(0.3),  IN(1.6), t.darker)
+    _oval(sl, IN(0.0),  IN(5.0),  IN(0.8), t.accent)
+    _oval(sl, IN(9.8),  IN(0.4),  IN(0.5), t.accent)
+
     _rect(sl, IN(0), IN(0),    IN(10), IN(0.10), t.darker)
     _rect(sl, IN(0), IN(0.10), IN(10), IN(0.04), t.accent)
 
@@ -697,10 +833,16 @@ def _pick_layout(sd, idx, total):
     if n == 1:      return 'title'
     if n == total:  return 'closing'
 
+    # Quote / impact slides — Vision, Mission, Values, CSR, Awards
+    quote_kw = ('vision', 'mission', 'value', 'csr', 'award', 'recogni',
+                'purpose', 'philosophy', 'pledge', 'commitment')
+    if any(k in title for k in quote_kw):
+        return 'quote'
+
     # Dark hero slides
-    dark_kw = ('founder', 'legacy', 'eminent', 'vision', 'mission', 'value',
-                'growth', 'scale', 'digital product', 'toppers', 'testimonial',
-                'csr', 'roadmap', 'future', 'award', 'recogni')
+    dark_kw = ('founder', 'legacy', 'eminent', 'growth', 'scale',
+                'digital product', 'toppers', 'testimonial',
+                'roadmap', 'future')
     if any(k in title for k in dark_kw):
         return 'dark'
 
@@ -765,6 +907,8 @@ def build_presentation(data, primary_hex='1A2E5A', accent_hex='C9962B'):
             _R_title(prs, blank, t, sd, data)
         elif layout == 'closing':
             _R_closing(prs, blank, t, sd, data)
+        elif layout == 'quote':
+            _R_quote(prs, blank, t, sd, cn, wu, n, total)
         elif layout == 'dark':
             _R_dark(prs, blank, t, sd, cn, wu, n, total)
         elif layout == 'timeline':
